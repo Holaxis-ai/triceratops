@@ -8,8 +8,8 @@ import pytest
 
 from tests.fixtures.stubs import StubPopulationSynthesisProvider, StubStarCatalogProvider
 from tests.fixtures.synthetic import make_flat_lightcurve, make_transit_lightcurve
-from triceratops_new.config.config import Config, MissionConfig
-from triceratops_new.domain.entities import LightCurve, StellarField
+from triceratops.config.config import Config, MissionConfig
+from triceratops.domain.entities import LightCurve, StellarField
 
 FIXTURES_DIR = Path(__file__).parent / "fixtures"
 GOLDEN_DIR = FIXTURES_DIR / "golden"

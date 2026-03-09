@@ -123,8 +123,6 @@ class TestDeterminism:
         funcs = [
             lambda x: sample_arg_periastron(x),
             lambda x: sample_inclination(x),
-            lambda x: sample_eccentricity(x, planet=True),
-            lambda x: sample_eccentricity(x, planet=False, period=5.0),
             lambda x: sample_planet_radius(x.copy(), host_mass=1.0, flat=False),
             lambda x: sample_planet_radius(x.copy(), host_mass=0.3, flat=False),
             lambda x: sample_mass_ratio(x.copy(), primary_mass=1.0),
@@ -135,3 +133,18 @@ class TestDeterminism:
             r1 = fn(u.copy())
             r2 = fn(u.copy())
             np.testing.assert_array_equal(r1, r2, err_msg=f"{fn} not deterministic")
+
+    def test_eccentricity_reproducible_with_seed(self) -> None:
+        u = np.random.default_rng(42).random(100)
+
+        np.random.seed(123)
+        r1_planet = sample_eccentricity(u.copy(), planet=True)
+        np.random.seed(123)
+        r2_planet = sample_eccentricity(u.copy(), planet=True)
+        np.testing.assert_array_equal(r1_planet, r2_planet)
+
+        np.random.seed(456)
+        r1_eb = sample_eccentricity(u.copy(), planet=False, period=5.0)
+        np.random.seed(456)
+        r2_eb = sample_eccentricity(u.copy(), planet=False, period=5.0)
+        np.testing.assert_array_equal(r1_eb, r2_eb)

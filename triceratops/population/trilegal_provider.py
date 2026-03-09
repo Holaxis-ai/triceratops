@@ -52,7 +52,10 @@ def _submit_trilegal_form(ra_deg: float, dec_deg: float) -> str | None:
         browser.submit_selected()
         sleep(5)
 
-        links = browser.get_current_page().select("a")
+        page = browser.get_current_page()
+        if page is None:
+            continue
+        links = page.select("a")
         if links:
             data_link = links[0].get("href")
             return _TRILEGAL_BASE + data_link[3:]

@@ -5,25 +5,29 @@ All network I/O in the package is isolated to this module.
 
 from __future__ import annotations
 
-import numpy as np
-import pandas as pd
-from astropy.coordinates import SkyCoord
-from astropy.wcs import WCS
+from typing import overload
+
 import astropy.units as u
-from astroquery.mast import Catalogs, Tesscut
-from astroquery.vizier import Vizier
+import numpy as np
+from astropy.coordinates import SkyCoord
+from astroquery.mast import Catalogs, Tesscut  # type: ignore[import-untyped]
+from astroquery.vizier import Vizier  # type: ignore[import-untyped]
 
 from triceratops.config.config import MissionConfig
 from triceratops.domain.entities import Star, StellarField
 from triceratops.domain.value_objects import StellarParameters
 
 
-def _safe_float(val: object, default: float) -> float:
+@overload
+def _safe_float(val: object, default: float) -> float: ...
+@overload
+def _safe_float(val: object, default: None) -> float | None: ...
+def _safe_float(val: object, default: float | None = 0.0) -> float | None:
     """Convert to float, returning *default* for NaN / None."""
     if val is None:
         return default
     try:
-        f = float(val)
+        f = float(val)  # type: ignore[arg-type]
         if np.isnan(f):
             return default
         return f
@@ -56,7 +60,7 @@ class MASTCatalogProvider:
         if mission == "Kepler":
             result = (
                 Vizier(columns=["_RA", "_DE"])
-                .query_constraints(KIC=str(tic_id), catalog="J/ApJS/229/30/catalog")
+                .query_constraints(KIC=str(tic_id), catalog="J/ApJS/229/30/catalog")  # type: ignore[attr-defined]
                 [0].as_array()
             )
             ra = float(result[0]["_RA"])
@@ -64,7 +68,7 @@ class MASTCatalogProvider:
         elif mission == "K2":
             result = (
                 Vizier(columns=["RAJ2000", "DEJ2000"])
-                .query_constraints(ID=str(tic_id), catalog="IV/34/epic")
+                .query_constraints(ID=str(tic_id), catalog="IV/34/epic")  # type: ignore[attr-defined]
                 [0].as_array()
             )
             ra = float(result[0]["RAJ2000"])
@@ -73,14 +77,14 @@ class MASTCatalogProvider:
         # For Kepler/K2, resolve to nearest TIC ID
         resolved_id = tic_id
         if ra is not None and dec is not None:
-            resolved_id = Catalogs.query_region(
+            resolved_id = Catalogs.query_region(  # type: ignore[attr-defined]
                 SkyCoord(ra, dec, unit="deg"),
                 radius=radius,
                 catalog="TIC",
             )[0]["ID"]
 
         # Query TIC
-        df = Catalogs.query_object(
+        df = Catalogs.query_object(  # type: ignore[attr-defined]
             "TIC" + str(resolved_id),
             radius=radius,
             catalog="TIC",
@@ -172,7 +176,7 @@ class TesscutApertureProvider:
                 images.append(np.nanmean(cutout_table["FLUX"], axis=0))
             else:
                 raise NotImplementedError(
-                    f"Kepler/K2 cutouts require lightkurve; not yet ported"
+                    "Kepler/K2 cutouts require lightkurve; not yet ported"
                 )
 
         return images

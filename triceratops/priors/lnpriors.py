@@ -244,7 +244,8 @@ def _compute_companion_rate(
             mask = logP >= 8.0
             f_comp[mask] = t4 + t5
 
-        return np.log(f_comp)
+        with np.errstate(divide='ignore', invalid='ignore'):
+            return np.log(f_comp)
     else:
         # M_s < 1.0: compute using M_s=1.0 then scale
         M_act = primary_mass
@@ -313,7 +314,8 @@ def _compute_companion_rate(
 
         f_act = 0.65 * f_comp + 0.35 * f_comp * M_act
         f_act[f_act < 0.0] = 0.0
-        return np.log(f_act)
+        with np.errstate(divide='ignore', invalid='ignore'):
+            return np.log(f_act)
 
 
 def lnprior_bound_companion(
@@ -372,4 +374,5 @@ def lnprior_background(
         Array of log-prior values, shape (N,).
     """
     seps = _separation_at_contrast(delta_mags, separations_arcsec, contrasts)
-    return np.log10((n_comp / 0.1) * (1 / 3600) ** 2 * seps**2)
+    with np.errstate(divide='ignore', invalid='ignore'):
+        return np.log10((n_comp / 0.1) * (1 / 3600) ** 2 * seps**2)

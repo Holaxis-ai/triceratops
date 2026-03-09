@@ -11,8 +11,8 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-from triceratops_new.domain.entities import Star, StellarField
-from triceratops_new.domain.value_objects import StellarParameters
+from triceratops.domain.entities import Star, StellarField
+from triceratops.domain.value_objects import StellarParameters
 
 
 class StubStarCatalogProvider:
@@ -110,6 +110,13 @@ class StubTRILEGALResult:
     imags: np.ndarray
     zmags: np.ndarray
 
+    def __len__(self) -> int:
+        return len(self.tmags)
+
+    @property
+    def n_stars(self) -> int:
+        return len(self.tmags)
+
 
 class StubPopulationSynthesisProvider:
     """Returns a fixed TRILEGAL-like background population without web requests.
@@ -129,20 +136,26 @@ class StubPopulationSynthesisProvider:
             self._df = pd.read_csv(self._path)
         return self._df
 
-    def query(self, ra: float, dec: float, target_tmag: float) -> StubTRILEGALResult:
+    def query(
+        self,
+        ra_deg: float = 0.0,
+        dec_deg: float = 0.0,
+        target_tmag: float = 10.0,
+        cache_path: Path | None = None,
+    ) -> StubTRILEGALResult:
         """Return fixture data regardless of input coordinates."""
         df = self._load()
         return StubTRILEGALResult(
-            tmags=df["Tmag"].values,
-            masses=df["mass"].values,
-            loggs=df["logg"].values,
-            teffs=df["Teff"].values,
-            metallicities=df["metallicity"].values,
-            jmags=df["Jmag"].values,
-            hmags=df["Hmag"].values,
-            kmags=df["Kmag"].values,
-            gmags=df["gmag"].values,
-            rmags=df["rmag"].values,
-            imags=df["imag"].values,
-            zmags=df["zmag"].values,
+            tmags=np.asarray(df["Tmag"]),
+            masses=np.asarray(df["mass"]),
+            loggs=np.asarray(df["logg"]),
+            teffs=np.asarray(df["Teff"]),
+            metallicities=np.asarray(df["metallicity"]),
+            jmags=np.asarray(df["Jmag"]),
+            hmags=np.asarray(df["Hmag"]),
+            kmags=np.asarray(df["Kmag"]),
+            gmags=np.asarray(df["gmag"]),
+            rmags=np.asarray(df["rmag"]),
+            imags=np.asarray(df["imag"]),
+            zmags=np.asarray(df["zmag"]),
         )

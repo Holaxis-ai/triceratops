@@ -15,7 +15,7 @@ from scipy.stats import beta, powerlaw
 
 def sample_planet_radius(
     u: np.ndarray,
-    host_mass: float,
+    host_mass: float | np.ndarray,
     flat: bool = False,
 ) -> np.ndarray:
     """Sample planet radii from the broken power-law prior.
@@ -26,7 +26,7 @@ def sample_planet_radius(
 
     Args:
         u: Uniform [0,1) samples, shape (N,).
-        host_mass: Host star mass in Solar masses (scalar).
+        host_mass: Host star mass in Solar masses (scalar or array).
         flat: If True, use a flat (uniform) prior.
 
     Returns:
@@ -133,8 +133,8 @@ def sample_eccentricity(
     For planets: Beta(0.867, 3.030) distribution (Kipping 2013).
     For binaries: power-law distribution dependent on period (Moe & Di Stefano 2017).
 
-    Note: the original uses beta.rvs/powerlaw.rvs ignoring ``u``. This port uses
-    the inverse CDF (ppf) so results are deterministic given ``u``.
+    Note: the original uses beta.rvs/powerlaw.rvs and ignores ``u``. This
+    function preserves that behavior for snapshot parity.
 
     Source: priors.py:134-155
 
@@ -146,22 +146,20 @@ def sample_eccentricity(
     Returns:
         Eccentricities in [0, 1), shape (N,).
     """
+    size = len(u)
     if planet:
-        return beta.ppf(u, 0.867, 3.030)
-    else:
-        if np.isscalar(period):
-            if period <= 10:  # type: ignore[operator]
-                # nu+1 = 0.2 => nu = -0.8; powerlaw(a) parameterises x^(a-1) on [0,1]
-                return powerlaw.ppf(u, 0.2)
-            else:
-                return powerlaw.ppf(u, 0.6)
-        else:
-            # period is an array: element-wise
-            result = np.empty_like(u)
-            short = np.asarray(period) <= 10
-            result[short] = powerlaw.ppf(u[short], 0.2)
-            result[~short] = powerlaw.ppf(u[~short], 0.6)
-            return result
+        return beta.rvs(0.867, 3.030, size=size)
+
+    if np.isscalar(period):
+        if period <= 10:  # type: ignore[operator]
+            return powerlaw.rvs(0.2, size=size)
+        return powerlaw.rvs(0.6, size=size)
+
+    result = np.empty_like(u)
+    short = np.asarray(period) <= 10
+    result[short] = powerlaw.rvs(0.2, size=np.count_nonzero(short))
+    result[~short] = powerlaw.rvs(0.6, size=np.count_nonzero(~short))
+    return result
 
 
 def sample_arg_periastron(u: np.ndarray) -> np.ndarray:

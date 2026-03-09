@@ -36,7 +36,7 @@ def load_contrast_curve(path: Path, band: str = "unknown") -> ContrastCurve:
     """
     if not Path(path).exists():
         raise FileNotFoundError(f"Contrast curve file not found: {path}")
-    data = np.loadtxt(path)
+    data = np.loadtxt(path, delimiter=",")
     if data.ndim == 1:
         data = data.reshape(1, -1)
     if data.shape[1] < 2:

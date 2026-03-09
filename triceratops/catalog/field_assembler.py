@@ -26,8 +26,8 @@ class StellarFieldAssembler:
         if aperture_provider is None:
             from triceratops.catalog.mast_provider import TesscutApertureProvider
             aperture_provider = TesscutApertureProvider()
-        self._catalog = catalog_provider
-        self._aperture = aperture_provider
+        self._catalog: StarCatalogProvider = catalog_provider
+        self._aperture: ApertureProvider = aperture_provider
 
     def assemble(
         self,

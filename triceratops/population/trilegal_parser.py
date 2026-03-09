@@ -63,7 +63,7 @@ def parse_trilegal_csv(
         # Real TRILEGAL format
         masses = df["Mact"].values.astype(float)
         loggs = df["logg"].values.astype(float)
-        teffs = (10.0 ** df["logTe"].values).astype(float)
+        teffs = np.power(10.0, np.asarray(df["logTe"])).astype(float)
         metallicities = df["[M/H]"].values.astype(float)
         jmags = df["J"].values.astype(float)
         hmags = df["H"].values.astype(float)

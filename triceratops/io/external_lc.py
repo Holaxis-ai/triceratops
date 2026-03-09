@@ -59,6 +59,6 @@ def load_external_lc_as_object(
         time_days=time,
         flux=flux,
         flux_err=float(np.mean(flux_err)),
-        cadence_days=float(time[1] - time[0]) if len(time) > 1 else 0.00139,
+        cadence_days=float(np.min(np.diff(time))) if len(time) > 1 else 0.00139,
     )
     return ExternalLightCurve(light_curve=lc, band=band, ldc=None)

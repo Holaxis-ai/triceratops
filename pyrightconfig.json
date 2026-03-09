@@ -1,0 +1,11 @@
+{
+  "include": ["."],
+  "exclude": [".venv", "triceratops.egg-info"],
+  "venvPath": ".",
+  "venv": ".venv",
+  "pythonVersion": "3.12",
+  "typeCheckingMode": "basic",
+  "reportMissingImports": true,
+  "reportMissingModuleSource": false,
+  "extraPaths": ["."]
+}

@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import numpy as np
 
-from triceratops_new.domain.entities import LightCurve
+from triceratops.domain.entities import LightCurve
 
 
 def make_transit_lightcurve(

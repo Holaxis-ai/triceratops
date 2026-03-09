@@ -10,7 +10,6 @@ from __future__ import annotations
 import numpy as np
 from scipy.interpolate import InterpolatedUnivariateSpline
 
-
 # ---------------------------------------------------------------------------
 # Hardcoded spline node arrays — ground truth values from funcs.py:15-47.
 # Do not change these.
