@@ -150,7 +150,7 @@ def sample_eccentricity(
         return beta.ppf(u, 0.867, 3.030)
     else:
         if np.isscalar(period):
-            if period <= 10:
+            if period <= 10:  # type: ignore[operator]
                 # nu+1 = 0.2 => nu = -0.8; powerlaw(a) parameterises x^(a-1) on [0,1]
                 return powerlaw.ppf(u, 0.2)
             else:
