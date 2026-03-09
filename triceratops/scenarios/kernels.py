@@ -42,16 +42,20 @@ def compute_lnZ(
 ) -> float:
     """Compute the log marginal likelihood (evidence) from a lnL array.
 
-    Z = mean(nan_to_num(exp(lnL + lnz_const)))
-    lnZ = log(Z)
+    Uses the log-sum-exp trick for numerical stability, which is correct
+    regardless of the number of data points (unlike a fixed lnz_const offset
+    which fails when sum(lnL) << -lnz_const, e.g. for large LC point counts).
 
-    The lnz_const offset prevents underflow. BUG-03 fix: this function
-    always receives lnz_const as a parameter (default 650 from Config),
-    never hardcodes it.
+    lnZ = log(mean(exp(lnL)))
+        = lnL_max + log(sum(exp(lnL_finite - lnL_max)) / N)
+
+    The lnz_const offset is added to the result for backward compatibility
+    with callers that inspect raw lnZ values; it cancels in all relative-
+    probability comparisons.
 
     Args:
         lnL: Array of per-sample log-likelihoods, shape (N,). May contain -inf.
-        lnz_const: Numerical stability offset from Config.lnz_const.
+        lnz_const: Constant added to the returned lnZ for legacy compatibility.
 
     Returns:
         lnZ: float. Will be -inf if all lnL values are -inf.
@@ -59,10 +63,11 @@ def compute_lnZ(
     finite_mask = np.isfinite(lnL)
     if not np.any(finite_mask):
         return float(-np.inf)
-    Z = np.mean(np.nan_to_num(np.exp(lnL + lnz_const)))
-    if Z <= 0.0:
-        return float(-np.inf)
-    return float(np.log(Z))
+    lnL_finite = lnL[finite_mask]
+    lnL_max = float(np.max(lnL_finite))
+    sum_exp = float(np.sum(np.exp(lnL_finite - lnL_max)))
+    N = len(lnL)
+    return lnL_max + float(np.log(sum_exp / N)) + lnz_const
 
 
 def pack_best_indices(
