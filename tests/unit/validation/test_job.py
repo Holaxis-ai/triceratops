@@ -496,7 +496,7 @@ class TestPreparerExternalLcLengthGuard:
     def _make_preparer(self) -> object:
         from unittest.mock import MagicMock
         from triceratops.domain.value_objects import StellarParameters
-        from triceratops.validation.preparer import ValidationPreparer
+        from triceratops.validation.legacy_adapter import LegacyPreparerAdapter
 
         star = Star(
             tic_id=1234,
@@ -513,7 +513,7 @@ class TestPreparerExternalLcLengthGuard:
         sf = StellarField(target_id=1234, mission="TESS", search_radius_pixels=10, stars=[star])
         mock_catalog = MagicMock()
         mock_catalog.query_nearby_stars.return_value = sf
-        return ValidationPreparer(catalog_provider=mock_catalog)
+        return LegacyPreparerAdapter(catalog_provider=mock_catalog)
 
     def test_matching_lengths_accepted(self, lc: LightCurve, cfg: Config, tmp_path) -> None:
         """Same-length lists should not raise (even if files don't exist for this unit test)."""
@@ -567,7 +567,7 @@ class TestPreparerExternalLcAsymmetricGuard:
     def _make_preparer(self) -> object:
         from unittest.mock import MagicMock
         from triceratops.domain.value_objects import StellarParameters
-        from triceratops.validation.preparer import ValidationPreparer
+        from triceratops.validation.legacy_adapter import LegacyPreparerAdapter
 
         star = Star(
             tic_id=1234,
@@ -584,7 +584,7 @@ class TestPreparerExternalLcAsymmetricGuard:
         sf = StellarField(target_id=1234, mission="TESS", search_radius_pixels=10, stars=[star])
         mock_catalog = MagicMock()
         mock_catalog.query_nearby_stars.return_value = sf
-        return ValidationPreparer(catalog_provider=mock_catalog)
+        return LegacyPreparerAdapter(catalog_provider=mock_catalog)
 
     def _call_prepare(self, preparer, lc, cfg, **kwargs):
         import numpy as np
@@ -625,7 +625,7 @@ class TestPreparerTrilegalScenarioGate:
     def _make_preparer_with_population(self):
         from unittest.mock import MagicMock
         from triceratops.domain.value_objects import StellarParameters
-        from triceratops.validation.preparer import ValidationPreparer
+        from triceratops.validation.legacy_adapter import LegacyPreparerAdapter
 
         star = Star(
             tic_id=9999,
@@ -644,7 +644,7 @@ class TestPreparerTrilegalScenarioGate:
         mock_catalog.query_nearby_stars.return_value = sf
         mock_pop = MagicMock()
         mock_pop.query.return_value = MagicMock()
-        preparer = ValidationPreparer(
+        preparer = LegacyPreparerAdapter(
             catalog_provider=mock_catalog,
             population_provider=mock_pop,
         )
@@ -730,7 +730,7 @@ class TestPreparerScenarioIdsValidation:
     def _make_preparer(self) -> object:
         from unittest.mock import MagicMock
         from triceratops.domain.value_objects import StellarParameters
-        from triceratops.validation.preparer import ValidationPreparer
+        from triceratops.validation.legacy_adapter import LegacyPreparerAdapter
 
         star = Star(
             tic_id=5555,
@@ -747,7 +747,7 @@ class TestPreparerScenarioIdsValidation:
         sf = StellarField(target_id=5555, mission="TESS", search_radius_pixels=10, stars=[star])
         mock_catalog = MagicMock()
         mock_catalog.query_nearby_stars.return_value = sf
-        return ValidationPreparer(catalog_provider=mock_catalog)
+        return LegacyPreparerAdapter(catalog_provider=mock_catalog)
 
     def test_unregistered_id_raises_before_any_io(self, lc: LightCurve, cfg: Config) -> None:
         """EBX2P exists in ScenarioID enum but is not in DEFAULT_REGISTRY — must raise ValueError."""
@@ -810,7 +810,7 @@ class TestPreparerScenarioIdsValidation:
         from triceratops.domain.scenario_id import ScenarioID
         from triceratops.domain.value_objects import StellarParameters
         from triceratops.scenarios.registry import DEFAULT_REGISTRY, ScenarioRegistry
-        from triceratops.validation.preparer import ValidationPreparer
+        from triceratops.validation.legacy_adapter import LegacyPreparerAdapter
 
         # Build a registry with only TP — the rest are absent.
         custom_reg = ScenarioRegistry()
@@ -832,7 +832,7 @@ class TestPreparerScenarioIdsValidation:
         mock_catalog = MagicMock()
         mock_catalog.query_nearby_stars.return_value = sf
 
-        preparer = ValidationPreparer(catalog_provider=mock_catalog, registry=custom_reg)
+        preparer = LegacyPreparerAdapter(catalog_provider=mock_catalog, registry=custom_reg)
 
         # TP is in the custom registry — must not raise
         try:
@@ -874,7 +874,7 @@ class TestPrepareComputeScenarioContract:
         from unittest.mock import MagicMock
         from triceratops.domain.scenario_id import ScenarioID
         from triceratops.domain.value_objects import StellarParameters
-        from triceratops.validation.preparer import ValidationPreparer
+        from triceratops.validation.legacy_adapter import LegacyPreparerAdapter
 
         star = Star(
             tic_id=7777,
@@ -891,7 +891,7 @@ class TestPrepareComputeScenarioContract:
         sf = StellarField(target_id=7777, mission="TESS", search_radius_pixels=10, stars=[star])
         mock_catalog = MagicMock()
         mock_catalog.query_nearby_stars.return_value = sf
-        preparer = ValidationPreparer(catalog_provider=mock_catalog)
+        preparer = LegacyPreparerAdapter(catalog_provider=mock_catalog)
 
         ids = [ScenarioID.TP, ScenarioID.EB]
         payload = preparer.prepare(

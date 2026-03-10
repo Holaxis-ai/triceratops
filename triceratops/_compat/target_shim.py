@@ -211,12 +211,19 @@ class target:
                 for f, b in zip(external_lc_files, filt_lcs)
             ]
 
+        # Load MOLUSC data if provided
+        molusc_data = None
+        if molusc_file is not None:
+            from triceratops.io.molusc import load_molusc_file
+
+            molusc_data = load_molusc_file(Path(molusc_file))
+
         self._workspace.compute_probs(
             light_curve=lc,
             period_days=P_orb,
             external_lcs=ext_lcs,
             contrast_curve=contrast_curve,
-            molusc_file=molusc_file,
+            molusc_data=molusc_data,
         )
 
         if plot:

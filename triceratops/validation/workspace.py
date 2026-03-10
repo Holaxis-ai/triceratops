@@ -9,6 +9,8 @@ Replaces the stateful aspects of the original ``target`` class:
 """
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 import numpy as np
 
 from triceratops.catalog.flux_contributions import compute_flux_ratios, compute_transit_depths
@@ -20,6 +22,9 @@ from triceratops.domain.scenario_id import ScenarioID
 from triceratops.domain.value_objects import ContrastCurve
 from triceratops.population.protocols import PopulationSynthesisProvider
 from triceratops.validation.engine import ValidationEngine
+
+if TYPE_CHECKING:
+    from triceratops.domain.molusc import MoluscData
 
 
 class ValidationWorkspace:
@@ -75,6 +80,26 @@ class ValidationWorkspace:
         self._engine = ValidationEngine(
             catalog_provider=self._catalog_provider,
             population_provider=self._population_provider,
+        )
+
+        # Assembly-layer delegation objects
+        from triceratops.assembly.orchestrator import DataAssemblyOrchestrator
+        from triceratops.lightcurve.ephemeris import ResolvedTarget
+        from triceratops.validation.preparer import ValidationPreparer
+
+        self._orchestrator = DataAssemblyOrchestrator(
+            catalog_provider=self._catalog_provider,
+            population_provider=self._population_provider,
+            aperture_provider=self._aperture_provider,
+        )
+        self._resolved_target = ResolvedTarget(
+            target_ref=str(tic_id),
+            tic_id=tic_id,
+            ephemeris=None,
+            source="workspace",
+        )
+        self._preparer = ValidationPreparer(
+            registry=self._engine._registry,
         )
 
     # -- Star field access and mutation --
@@ -167,26 +192,23 @@ class ValidationWorkspace:
         scenario_ids: list[ScenarioID] | None = None,
         external_lcs: list[ExternalLightCurve] | None = None,
         contrast_curve: ContrastCurve | None = None,
-        molusc_file: str | None = None,
+        molusc_data: MoluscData | None = None,
     ) -> ValidationResult:
         """Run validation computation and cache the result.
 
-        Provider-backed IO (TRILEGAL population fetch) is performed here, before
-        calling the engine via PreparedValidationInputs.  The engine receives
-        only materialised data.
+        Delegates acquisition (TRILEGAL) to the orchestrator, then routes
+        through prepare() and compute_prepared() so all validation gates
+        apply uniformly.
 
         Returns:
             ValidationResult, also stored internally for property access.
         """
+        import dataclasses
+
+        from triceratops.assembly.config import AssemblyConfig
         from triceratops.validation.errors import UnsupportedComputeModeError
-        from triceratops.validation.job import PreparedValidationInputs
 
         # Mission gate — fail before any provider IO.
-        # Check stellar_field.mission (the actual assembled field) rather than
-        # self.mission (the construction argument) so this gate uses the same
-        # source as the compute boundary in PreparedValidationInputs.validate().
-        # A misbehaving catalog provider that returns the wrong mission would
-        # otherwise bypass a self.mission check and only be caught at compute time.
         if self._stellar_field.mission != "TESS":
             raise UnsupportedComputeModeError(
                 f"compute_probs() only supports mission='TESS'. "
@@ -197,53 +219,31 @@ class ValidationWorkspace:
 
         self._last_light_curve = light_curve
 
-        # Materialise TRILEGAL population here (workspace owns provider IO).
-        # The engine is provider-free: it only accepts pre-materialised data.
-        trilegal_population = None
-        if self._population_provider is not None:
-            from pathlib import Path
-            from triceratops.domain.scenario_id import ScenarioID as _SID
-
-            registry = self._engine._registry
-            if scenario_ids is not None:
-                eligible = [registry.get(sid) for sid in scenario_ids]
-            else:
-                eligible = registry.all_scenarios()
-            needs_trilegal = any(
-                s.scenario_id in _SID.trilegal_scenarios() for s in eligible
-            )
-            if needs_trilegal:
-                cache = Path(self._trilegal_cache_path) if self._trilegal_cache_path else None
-                target = self._stellar_field.target
-                trilegal_population = self._population_provider.query(
-                    ra_deg=target.ra_deg,
-                    dec_deg=target.dec_deg,
-                    target_tmag=target.tmag,
-                    cache_path=cache,
-                )
-
-        # Load MOLUSC data if provided
-        molusc_data = None
-        if molusc_file is not None:
-            from pathlib import Path
-            from triceratops.io.molusc import load_molusc_file
-            molusc_data = load_molusc_file(Path(molusc_file))
-
-        # All paths route through compute_prepared() so the field validation gate
-        # and scenario_ids consistency guards always apply.
-        # PreparedValidationInputs carries scenario_ids (job.py:78), so no separate
-        # fallback path to engine.compute() is needed.
-        prepared = PreparedValidationInputs(
-            target_id=self.tic_id,
+        # Assemble via orchestrator — TRILEGAL fetch happens here if needed.
+        # Pass stellar_field to skip catalog re-query.
+        reassembly_config = AssemblyConfig(
+            mission=self.mission,
+            include_light_curve=False,
+            trilegal_cache_path=self._trilegal_cache_path,
+        )
+        assembled = self._orchestrator.assemble(
+            target=self._resolved_target,
+            config=reassembly_config,
+            scenario_ids=scenario_ids,
             stellar_field=self._stellar_field,
+        )
+
+        # Supplement with workspace-local inputs
+        assembled = dataclasses.replace(
+            assembled,
             light_curve=light_curve,
-            config=self.config,
-            period_days=period_days,
-            trilegal_population=trilegal_population,
-            external_lcs=external_lcs,
             contrast_curve=contrast_curve,
             molusc_data=molusc_data,
-            scenario_ids=scenario_ids,
+            external_lcs=external_lcs,
+        )
+
+        prepared = self._preparer.prepare(
+            assembled, self.config, period_days, scenario_ids=scenario_ids,
         )
         result = self._engine.compute_prepared(prepared)
 

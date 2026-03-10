@@ -194,9 +194,9 @@ class TestWorkspaceMissionGate:
 class TestPrepBoundaryMissionGate:
     def _make_preparer(self) -> object:
         from unittest.mock import MagicMock
-        from triceratops.validation.preparer import ValidationPreparer
+        from triceratops.validation.legacy_adapter import LegacyPreparerAdapter
 
-        preparer = ValidationPreparer(
+        preparer = LegacyPreparerAdapter(
             catalog_provider=MagicMock(),
             aperture_provider=MagicMock(),
         )
@@ -205,12 +205,12 @@ class TestPrepBoundaryMissionGate:
     def test_tess_is_accepted(self) -> None:
         """prepare() with mission='TESS' does not raise at the mission gate."""
         from unittest.mock import MagicMock, patch
-        from triceratops.validation.preparer import ValidationPreparer
+        from triceratops.validation.legacy_adapter import LegacyPreparerAdapter
 
         catalog = MagicMock()
         catalog.query_nearby_stars.return_value = _field(mission="TESS")
 
-        preparer = ValidationPreparer(catalog_provider=catalog)
+        preparer = LegacyPreparerAdapter(catalog_provider=catalog)
         # Patch downstream IO so the test stops after the mission gate passes
         with patch.object(preparer, "_population", None):
             try:
@@ -268,10 +268,10 @@ class TestPrepBoundaryMissionGate:
     def test_mission_gate_fires_before_io(self) -> None:
         """Mission gate must fire before any catalog query (no provider calls)."""
         from unittest.mock import MagicMock
-        from triceratops.validation.preparer import ValidationPreparer
+        from triceratops.validation.legacy_adapter import LegacyPreparerAdapter
 
         catalog = MagicMock()
-        preparer = ValidationPreparer(catalog_provider=catalog)
+        preparer = LegacyPreparerAdapter(catalog_provider=catalog)
 
         with pytest.raises(UnsupportedComputeModeError):
             preparer.prepare(
@@ -289,14 +289,14 @@ class TestPrepBoundaryMissionGate:
         """If the catalog returns a Kepler field despite mission='TESS' being passed,
         the field-level mission check catches it before TRILEGAL fetch."""
         from unittest.mock import MagicMock
-        from triceratops.validation.preparer import ValidationPreparer
+        from triceratops.validation.legacy_adapter import LegacyPreparerAdapter
 
         catalog = MagicMock()
         # Provider returns a Kepler field even though TESS was requested
         catalog.query_nearby_stars.return_value = _field(mission="Kepler")
         population = MagicMock()
 
-        preparer = ValidationPreparer(
+        preparer = LegacyPreparerAdapter(
             catalog_provider=catalog,
             population_provider=population,
         )

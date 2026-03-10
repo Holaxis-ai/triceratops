@@ -1,4 +1,4 @@
-"""Tests for ValidationPreparer (Phase 3) and remote-style compute."""
+"""Tests for ValidationPreparer and remote-style compute."""
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -7,7 +7,6 @@ from unittest.mock import MagicMock
 import numpy as np
 import pytest
 
-from triceratops.catalog.protocols import StarCatalogProvider
 from triceratops.config.config import Config
 from triceratops.domain.entities import LightCurve, Star, StellarField
 from triceratops.domain.result import ScenarioResult, ValidationResult
@@ -159,49 +158,268 @@ def _make_scenario_result(sid: ScenarioID, lnZ: float = 0.0, n: int = 10) -> Sce
     )
 
 
+def _make_assembled_inputs(
+    tic_id: int = 11111,
+    mission: str = "TESS",
+    with_lc: bool = True,
+    with_trilegal: bool = False,
+    stellar_params: StellarParameters | None = None,
+) -> "AssembledInputs":
+    """Build a minimal AssembledInputs for testing prepare()."""
+    from triceratops.assembly.inputs import AssembledInputs
+    from triceratops.lightcurve.ephemeris import ResolvedTarget
+
+    sf = _make_stellar_field(tic_id)
+    sf.mission = mission
+
+    if stellar_params is not None:
+        sf.stars[0].stellar_params = stellar_params
+
+    rt = ResolvedTarget(target_ref=f"TIC {tic_id}", tic_id=tic_id)
+    trilegal = _make_trilegal() if with_trilegal else None
+    lc = _make_lc() if with_lc else None
+
+    return AssembledInputs(
+        resolved_target=rt,
+        stellar_field=sf,
+        light_curve=lc,
+        trilegal_population=trilegal,
+    )
+
+
 # ---------------------------------------------------------------------------
 # ValidationPreparer construction tests
 # ---------------------------------------------------------------------------
 
 
 class TestValidationPreparerConstruction:
-    def test_constructs_with_catalog_provider_only(self) -> None:
-        """Can construct with only a catalog provider."""
-        sf = _make_stellar_field()
-        preparer = ValidationPreparer(catalog_provider=_StubCatalogProvider(sf))
+    def test_constructs_with_defaults(self) -> None:
+        """Can construct with no arguments (uses default registry)."""
+        preparer = ValidationPreparer()
         assert preparer is not None
 
-    def test_constructs_with_all_providers(self) -> None:
-        """Can construct with all providers."""
-        sf = _make_stellar_field()
-        pop = _StubPopulationProvider(_make_trilegal())
-        preparer = ValidationPreparer(
-            catalog_provider=_StubCatalogProvider(sf),
-            population_provider=pop,
-            aperture_provider=None,
-        )
+    def test_constructs_with_registry(self) -> None:
+        """Can construct with a custom registry."""
+        registry = ScenarioRegistry()
+        preparer = ValidationPreparer(registry=registry)
         assert preparer is not None
-
-    def test_population_provider_defaults_to_none(self) -> None:
-        """population_provider defaults to None."""
-        sf = _make_stellar_field()
-        preparer = ValidationPreparer(catalog_provider=_StubCatalogProvider(sf))
-        assert preparer._population is None
 
 
 # ---------------------------------------------------------------------------
-# ValidationPreparer.prepare() tests
+# ValidationPreparer.prepare() tests (formerly prepare_from_assembled)
 # ---------------------------------------------------------------------------
 
 
-class TestValidationPreparerPrepare:
-    def test_prepare_returns_prepared_validation_inputs(self) -> None:
-        """prepare() returns a PreparedValidationInputs."""
-        sf = _make_stellar_field()
-        catalog = _StubCatalogProvider(sf)
-        preparer = ValidationPreparer(catalog_provider=catalog)
+class TestPrepare:
+    """Tests for ValidationPreparer.prepare()."""
+
+    def test_returns_prepared_validation_inputs(self) -> None:
+        """Valid inputs produce a PreparedValidationInputs with correct fields."""
+        preparer = ValidationPreparer()
+        assembled = _make_assembled_inputs()
+        cfg = _make_cfg()
+
+        result = preparer.prepare(assembled, cfg, period_days=5.0)
+
+        assert isinstance(result, PreparedValidationInputs)
+        assert result.target_id == 11111
+        assert result.stellar_field is assembled.stellar_field
+        assert result.light_curve is assembled.light_curve
+        assert result.config is cfg
+        assert result.period_days == pytest.approx(5.0)
+
+    def test_does_not_call_any_provider(self) -> None:
+        """prepare() must not call any provider (pure validation)."""
+        preparer = ValidationPreparer()
+        assembled = _make_assembled_inputs()
+        cfg = _make_cfg()
+
+        result = preparer.prepare(assembled, cfg, period_days=5.0)
+        assert isinstance(result, PreparedValidationInputs)
+
+    def test_passes_scenario_ids_through(self) -> None:
+        preparer = ValidationPreparer()
+        assembled = _make_assembled_inputs()
+        cfg = _make_cfg()
 
         result = preparer.prepare(
+            assembled, cfg, period_days=5.0, scenario_ids=[ScenarioID.TP],
+        )
+        assert result.scenario_ids == [ScenarioID.TP]
+
+    def test_carries_trilegal_population(self) -> None:
+        preparer = ValidationPreparer()
+        assembled = _make_assembled_inputs(with_trilegal=True)
+        cfg = _make_cfg()
+
+        result = preparer.prepare(assembled, cfg, period_days=5.0)
+        assert result.trilegal_population is assembled.trilegal_population
+        assert result.trilegal_population is not None
+
+    def test_mission_gate_rejects_non_tess(self) -> None:
+        from triceratops.validation.errors import UnsupportedComputeModeError
+
+        preparer = ValidationPreparer()
+        assembled = _make_assembled_inputs(mission="Kepler")
+        cfg = _make_cfg()
+
+        with pytest.raises(UnsupportedComputeModeError, match="TESS"):
+            preparer.prepare(assembled, cfg, period_days=5.0)
+
+    def test_rejects_missing_stellar_params(self) -> None:
+        from triceratops.validation.errors import PreparedInputIncompleteError
+
+        preparer = ValidationPreparer()
+        assembled = _make_assembled_inputs()
+        assembled.stellar_field.stars[0].stellar_params = None
+        cfg = _make_cfg()
+
+        with pytest.raises(PreparedInputIncompleteError, match="stellar_params"):
+            preparer.prepare(assembled, cfg, period_days=5.0)
+
+    def test_rejects_empty_light_curve(self) -> None:
+        from triceratops.validation.errors import ValidationInputError
+        from triceratops.assembly.inputs import AssembledInputs
+        from triceratops.lightcurve.ephemeris import ResolvedTarget
+
+        preparer = ValidationPreparer()
+        empty_lc = LightCurve(
+            time_days=np.array([]),
+            flux=np.array([]),
+            flux_err=0.001,
+        )
+        assembled = AssembledInputs(
+            resolved_target=ResolvedTarget(target_ref="TIC 11111", tic_id=11111),
+            stellar_field=_make_stellar_field(),
+            light_curve=empty_lc,
+        )
+        cfg = _make_cfg()
+
+        with pytest.raises(ValidationInputError, match="empty"):
+            preparer.prepare(assembled, cfg, period_days=5.0)
+
+    def test_rejects_none_light_curve(self) -> None:
+        from triceratops.validation.errors import ValidationInputError
+        from triceratops.assembly.inputs import AssembledInputs
+        from triceratops.lightcurve.ephemeris import ResolvedTarget
+
+        preparer = ValidationPreparer()
+        assembled = AssembledInputs(
+            resolved_target=ResolvedTarget(target_ref="TIC 11111", tic_id=11111),
+            stellar_field=_make_stellar_field(),
+            light_curve=None,
+        )
+        cfg = _make_cfg()
+
+        with pytest.raises(ValidationInputError, match="None"):
+            preparer.prepare(assembled, cfg, period_days=5.0)
+
+    def test_rejects_negative_period(self) -> None:
+        from triceratops.validation.errors import ValidationInputError
+
+        preparer = ValidationPreparer()
+        assembled = _make_assembled_inputs()
+        cfg = _make_cfg()
+
+        with pytest.raises(ValidationInputError, match="positive"):
+            preparer.prepare(assembled, cfg, period_days=-1.0)
+
+    def test_rejects_nonfinite_period(self) -> None:
+        from triceratops.validation.errors import ValidationInputError
+
+        preparer = ValidationPreparer()
+        assembled = _make_assembled_inputs()
+        cfg = _make_cfg()
+
+        with pytest.raises(ValidationInputError, match="finite"):
+            preparer.prepare(assembled, cfg, period_days=float("inf"))
+
+    def test_rejects_unregistered_scenario_ids(self) -> None:
+        empty_registry = ScenarioRegistry()
+        preparer = ValidationPreparer(registry=empty_registry)
+        assembled = _make_assembled_inputs()
+        cfg = _make_cfg()
+
+        with pytest.raises(ValueError, match="not registered"):
+            preparer.prepare(
+                assembled, cfg, period_days=5.0,
+                scenario_ids=[ScenarioID.TP],
+            )
+
+    def test_end_to_end_orchestrator_to_engine(self) -> None:
+        """assemble() -> prepare() -> compute_prepared() chain."""
+        from triceratops.assembly.orchestrator import DataAssemblyOrchestrator
+        from triceratops.assembly.config import AssemblyConfig
+        from triceratops.lightcurve.ephemeris import ResolvedTarget
+
+        sf = _make_stellar_field(77777)
+        catalog = _StubCatalogProvider(sf)
+
+        orch = DataAssemblyOrchestrator(catalog_provider=catalog)
+        target = ResolvedTarget(target_ref="TIC 77777", tic_id=77777)
+        asm_config = AssemblyConfig(include_light_curve=False)
+        assembled = orch.assemble(target, asm_config)
+
+        from dataclasses import replace
+        assembled = replace(assembled, light_curve=_make_lc())
+
+        sr = _make_scenario_result(ScenarioID.TP, lnZ=0.0)
+        fake = _FakeScenario(_scenario_id=ScenarioID.TP, _result=sr)
+        registry = ScenarioRegistry()
+        registry.register(fake)
+
+        preparer = ValidationPreparer(registry=registry)
+        cfg = _make_cfg()
+        pvi = preparer.prepare(
+            assembled, cfg, period_days=5.0,
+            scenario_ids=[ScenarioID.TP],
+        )
+
+        engine = ValidationEngine(registry=registry)
+        vr = engine.compute_prepared(pvi)
+        assert isinstance(vr, ValidationResult)
+        assert 0.0 <= vr.fpp <= 1.0
+
+    def test_period_range_validation(self) -> None:
+        """Period range [min, max] is validated."""
+        from triceratops.validation.errors import ValidationInputError
+
+        preparer = ValidationPreparer()
+        assembled = _make_assembled_inputs()
+        cfg = _make_cfg()
+
+        # min >= max
+        with pytest.raises(ValidationInputError, match="min < max"):
+            preparer.prepare(assembled, cfg, period_days=[5.0, 3.0])
+
+        # valid range works
+        result = preparer.prepare(assembled, cfg, period_days=[3.0, 5.0])
+        assert isinstance(result, PreparedValidationInputs)
+
+
+# ---------------------------------------------------------------------------
+# LegacyPreparerAdapter tests
+# ---------------------------------------------------------------------------
+
+
+class TestLegacyPreparerAdapter:
+    """Tests that the legacy 18-arg prepare() still works via the adapter."""
+
+    def test_constructs_with_catalog_provider_only(self) -> None:
+        from triceratops.validation.legacy_adapter import LegacyPreparerAdapter
+
+        sf = _make_stellar_field()
+        adapter = LegacyPreparerAdapter(catalog_provider=_StubCatalogProvider(sf))
+        assert adapter is not None
+
+    def test_prepare_returns_prepared_validation_inputs(self) -> None:
+        from triceratops.validation.legacy_adapter import LegacyPreparerAdapter
+
+        sf = _make_stellar_field()
+        catalog = _StubCatalogProvider(sf)
+        adapter = LegacyPreparerAdapter(catalog_provider=catalog)
+
+        result = adapter.prepare(
             target_id=11111,
             sectors=np.array([1, 2]),
             light_curve=_make_lc(),
@@ -211,14 +429,15 @@ class TestValidationPreparerPrepare:
         assert isinstance(result, PreparedValidationInputs)
 
     def test_prepare_populates_all_required_fields(self) -> None:
-        """prepare() populates target_id, stellar_field, light_curve, config, period_days."""
+        from triceratops.validation.legacy_adapter import LegacyPreparerAdapter
+
         sf = _make_stellar_field(99999)
         catalog = _StubCatalogProvider(sf)
         lc = _make_lc()
         cfg = _make_cfg()
 
-        preparer = ValidationPreparer(catalog_provider=catalog)
-        pvi = preparer.prepare(
+        adapter = LegacyPreparerAdapter(catalog_provider=catalog)
+        pvi = adapter.prepare(
             target_id=99999,
             sectors=np.array([5]),
             light_curve=lc,
@@ -232,12 +451,13 @@ class TestValidationPreparerPrepare:
         assert pvi.period_days == pytest.approx(14.2)
 
     def test_prepare_calls_catalog_provider(self) -> None:
-        """prepare() calls the catalog provider exactly once."""
+        from triceratops.validation.legacy_adapter import LegacyPreparerAdapter
+
         sf = _make_stellar_field()
         catalog = _StubCatalogProvider(sf)
-        preparer = ValidationPreparer(catalog_provider=catalog)
+        adapter = LegacyPreparerAdapter(catalog_provider=catalog)
 
-        preparer.prepare(
+        adapter.prepare(
             target_id=11111,
             sectors=np.array([1]),
             light_curve=_make_lc(),
@@ -247,13 +467,14 @@ class TestValidationPreparerPrepare:
         assert catalog.call_count == 1
 
     def test_prepare_fetches_trilegal_when_provider_given(self) -> None:
-        """prepare() fetches TRILEGAL population when population_provider is given."""
+        from triceratops.validation.legacy_adapter import LegacyPreparerAdapter
+
         sf = _make_stellar_field()
         catalog = _StubCatalogProvider(sf)
         pop = _StubPopulationProvider(_make_trilegal())
-        preparer = ValidationPreparer(catalog_provider=catalog, population_provider=pop)
+        adapter = LegacyPreparerAdapter(catalog_provider=catalog, population_provider=pop)
 
-        pvi = preparer.prepare(
+        pvi = adapter.prepare(
             target_id=11111,
             sectors=np.array([1]),
             light_curve=_make_lc(),
@@ -265,12 +486,13 @@ class TestValidationPreparerPrepare:
         assert isinstance(pvi.trilegal_population, TRILEGALResult)
 
     def test_prepare_trilegal_none_when_no_provider(self) -> None:
-        """prepare() leaves trilegal_population=None when no population_provider."""
+        from triceratops.validation.legacy_adapter import LegacyPreparerAdapter
+
         sf = _make_stellar_field()
         catalog = _StubCatalogProvider(sf)
-        preparer = ValidationPreparer(catalog_provider=catalog, population_provider=None)
+        adapter = LegacyPreparerAdapter(catalog_provider=catalog, population_provider=None)
 
-        pvi = preparer.prepare(
+        pvi = adapter.prepare(
             target_id=11111,
             sectors=np.array([1]),
             light_curve=_make_lc(),
@@ -280,12 +502,13 @@ class TestValidationPreparerPrepare:
         assert pvi.trilegal_population is None
 
     def test_prepare_optional_fields_default_to_none(self) -> None:
-        """Optional fields are None when no files/data provided."""
+        from triceratops.validation.legacy_adapter import LegacyPreparerAdapter
+
         sf = _make_stellar_field()
         catalog = _StubCatalogProvider(sf)
-        preparer = ValidationPreparer(catalog_provider=catalog)
+        adapter = LegacyPreparerAdapter(catalog_provider=catalog)
 
-        pvi = preparer.prepare(
+        pvi = adapter.prepare(
             target_id=11111,
             sectors=np.array([1]),
             light_curve=_make_lc(),
@@ -323,15 +546,12 @@ class TestWorkspaceConstructorIO:
         boom_pop = _BoomProvider()
 
         from triceratops.validation.workspace import ValidationWorkspace
-        # Constructing the workspace with a boom population provider must not raise.
-        # The provider should only be called during compute_probs().
         ws = ValidationWorkspace(
             tic_id=12345,
             sectors=np.array([1]),
             catalog_provider=catalog,
             population_provider=boom_pop,  # type: ignore[arg-type]
         )
-        # If we reach here, no provider call happened during __init__
         assert ws is not None
 
 
@@ -348,7 +568,7 @@ class TestRemoteStyleCompute:
     """
 
     def test_remote_style_compute_produces_result_with_fpp_in_range(self) -> None:
-        """Direct PreparedValidationInputs → compute_prepared() → FPP in [0, 1]."""
+        """Direct PreparedValidationInputs -> compute_prepared() -> FPP in [0, 1]."""
         sf = _make_stellar_field(77777)
         lc = _make_lc()
         cfg = _make_cfg()
@@ -358,10 +578,8 @@ class TestRemoteStyleCompute:
         registry = ScenarioRegistry()
         registry.register(fake)
 
-        # Engine has no providers
         engine = ValidationEngine(registry=registry)
 
-        # PreparedValidationInputs built without any provider
         pvi = PreparedValidationInputs(
             target_id=77777,
             stellar_field=sf,
@@ -389,7 +607,6 @@ class TestRemoteStyleCompute:
         registry = ScenarioRegistry()
         registry.register(fake)
 
-        # Engine has no providers
         engine = ValidationEngine(registry=registry)
 
         pvi = PreparedValidationInputs(
