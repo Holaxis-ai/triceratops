@@ -1,6 +1,5 @@
-"""Raw light-curve acquisition sources."""
-from triceratops.lightcurve.sources.array import ArrayRawSource
-from triceratops.lightcurve.sources.file import FileRawSource
-from triceratops.lightcurve.sources.lightkurve import LightkurveRawSource
+"""Light-curve acquisition sources."""
+from triceratops.lightcurve.sources.file import FileSource
+from triceratops.lightcurve.sources.lightkurve import LightkurveSource
 
-__all__ = ["ArrayRawSource", "FileRawSource", "LightkurveRawSource"]
+__all__ = ["FileSource", "LightkurveSource"]

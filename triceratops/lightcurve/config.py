@@ -19,14 +19,10 @@ class LightCurveConfig:
     quality_mask: Literal["none", "default", "hard"] = "default"
     detrend_method: Literal["flatten", "none"] = "none"
     sigma_clip: float | None = 5.0
-    bin_minutes: float | None = None
 
     # --- advanced parameters ---
     flatten_window_length: int = 401
     flatten_polyorder: int = 3
-    sigma_clip_iters: int = 5
-    phase_bin_count: int | None = None
-    normalize: Literal["median", "mean", "none"] = "median"
     phase_window_factor: float = 5.0
     flux_type: Literal["pdcsap_flux", "sap_flux"] = "pdcsap_flux"
     cadence_days_override: float | None = None
@@ -42,10 +38,6 @@ class LightCurveConfig:
             raise ValueError(
                 f"flatten_polyorder must be between 1 and 5, got {self.flatten_polyorder}"
             )
-        if self.sigma_clip_iters < 1:
-            raise ValueError(
-                f"sigma_clip_iters must be >= 1, got {self.sigma_clip_iters}"
-            )
         if self.phase_window_factor < 1.0:
             raise ValueError(
                 f"phase_window_factor must be >= 1.0, got {self.phase_window_factor}"
@@ -57,14 +49,6 @@ class LightCurveConfig:
         if self.sigma_clip is not None and self.sigma_clip <= 0:
             raise ValueError(
                 f"sigma_clip must be positive or None, got {self.sigma_clip}"
-            )
-        if self.bin_minutes is not None and self.bin_minutes <= 0:
-            raise ValueError(
-                f"bin_minutes must be positive or None, got {self.bin_minutes}"
-            )
-        if self.phase_bin_count is not None and self.phase_bin_count < 1:
-            raise ValueError(
-                f"phase_bin_count must be >= 1 or None, got {self.phase_bin_count}"
             )
         if self.cadence_days_override is not None and self.cadence_days_override <= 0:
             raise ValueError(

@@ -19,7 +19,7 @@ if TYPE_CHECKING:
         ContrastCurveSource,
         ExternalLcSource,
         MoluscSource,
-        RawLightCurveSource,
+        LightCurveSource,
     )
     from triceratops.catalog.protocols import ApertureProvider, StarCatalogProvider
     from triceratops.domain.entities import (
@@ -50,7 +50,7 @@ class DataAssemblyOrchestrator:
         self,
         *,
         catalog_provider: StarCatalogProvider,
-        lc_source: RawLightCurveSource | None = None,
+        lc_source: LightCurveSource | None = None,
         population_provider: PopulationSynthesisProvider | None = None,
         aperture_provider: ApertureProvider | None = None,
         contrast_source: ContrastCurveSource | None = None,

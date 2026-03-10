@@ -1,6 +1,5 @@
 """Tier 1 tests for lightcurve pure types: Ephemeris, ResolvedTarget,
-RawLightCurveData, LightCurveConfig, LightCurvePreparationResult,
-and the error hierarchy.
+LightCurveConfig, LightCurvePreparationResult, and the error hierarchy.
 
 No lightkurve imports, no network calls.
 """
@@ -24,25 +23,7 @@ from triceratops.lightcurve.errors import (
     LightCurvePreparationError,
     SectorNotAvailableError,
 )
-from triceratops.lightcurve.raw import RawLightCurveData
 from triceratops.lightcurve.result import LightCurvePreparationResult
-
-
-# ── helpers ──────────────────────────────────────────────────────────
-
-def _make_raw(**overrides) -> RawLightCurveData:
-    """Build a valid RawLightCurveData, overriding any field."""
-    defaults = dict(
-        time_btjd=np.linspace(1468.0, 1475.0, 500),
-        flux=np.ones(500),
-        flux_err=np.full(500, 3e-4),
-        sectors=(14,),
-        cadence="2min",
-        exptime_seconds=120.0,
-        target_id=None,
-    )
-    defaults.update(overrides)
-    return RawLightCurveData(**defaults)
 
 
 # ═══════════════════════════════════════════════════════════════════
@@ -104,80 +85,6 @@ class TestResolvedTarget:
 
 
 # ═══════════════════════════════════════════════════════════════════
-# RawLightCurveData validation
-# ═══════════════════════════════════════════════════════════════════
-
-
-class TestRawLightCurveData:
-    def test_valid_construction(self):
-        raw = _make_raw()
-        assert raw.cadence == "2min"
-        assert raw.sectors == (14,)
-        assert len(raw.time_btjd) == 500
-
-    def test_rejects_mismatched_lengths(self):
-        with pytest.raises(ValueError, match="equal length"):
-            _make_raw(flux=np.ones(99))
-
-    def test_rejects_empty_arrays(self):
-        with pytest.raises(ValueError, match="non-empty"):
-            _make_raw(
-                time_btjd=np.array([]),
-                flux=np.array([]),
-                flux_err=np.array([]),
-            )
-
-    def test_rejects_non_monotonic_time(self):
-        t = np.linspace(1468, 1475, 100)
-        t[50] = t[49]  # duplicate — not strictly monotonic
-        with pytest.raises(ValueError, match="monotonically"):
-            _make_raw(
-                time_btjd=t,
-                flux=np.ones(100),
-                flux_err=np.full(100, 3e-4),
-            )
-
-    def test_rejects_nan_in_flux(self):
-        flux = np.ones(500)
-        flux[42] = np.nan
-        with pytest.raises(ValueError, match="non-finite"):
-            _make_raw(flux=flux)
-
-    def test_rejects_inf_in_time(self):
-        t = np.linspace(1468.0, 1475.0, 500)
-        t[0] = np.inf
-        with pytest.raises(ValueError, match="non-finite"):
-            _make_raw(time_btjd=t)
-
-    def test_rejects_nan_in_flux_err(self):
-        ferr = np.full(500, 3e-4)
-        ferr[10] = np.nan
-        with pytest.raises(ValueError, match="non-finite"):
-            _make_raw(flux_err=ferr)
-
-    def test_rejects_2d_time(self):
-        with pytest.raises(ValueError, match="1-D"):
-            _make_raw(time_btjd=np.ones((10, 2)))
-
-    def test_rejects_empty_sectors(self):
-        with pytest.raises(ValueError, match="non-empty"):
-            _make_raw(sectors=())
-
-    def test_rejects_unknown_cadence(self):
-        with pytest.raises(ValueError, match="unrecognised cadence"):
-            _make_raw(cadence="5min")
-
-    def test_rejects_non_positive_exptime(self):
-        with pytest.raises(ValueError, match="positive"):
-            _make_raw(exptime_seconds=0)
-
-    def test_frozen(self):
-        raw = _make_raw()
-        with pytest.raises(AttributeError):
-            raw.cadence = "10min"  # type: ignore[misc]
-
-
-# ═══════════════════════════════════════════════════════════════════
 # LightCurveConfig validation
 # ═══════════════════════════════════════════════════════════════════
 
@@ -204,10 +111,6 @@ class TestLightCurveConfig:
         with pytest.raises(ValueError, match="between 1 and 5"):
             LightCurveConfig(flatten_polyorder=6)
 
-    def test_sigma_clip_iters_must_be_positive(self):
-        with pytest.raises(ValueError, match="sigma_clip_iters"):
-            LightCurveConfig(sigma_clip_iters=0)
-
     def test_phase_window_factor_must_be_ge_one(self):
         with pytest.raises(ValueError, match="phase_window_factor"):
             LightCurveConfig(phase_window_factor=0.5)
@@ -223,10 +126,6 @@ class TestLightCurveConfig:
     def test_none_sigma_clip_is_allowed(self):
         cfg = LightCurveConfig(sigma_clip=None)
         assert cfg.sigma_clip is None
-
-    def test_negative_bin_minutes_rejected(self):
-        with pytest.raises(ValueError, match="bin_minutes"):
-            LightCurveConfig(bin_minutes=-5.0)
 
     def test_negative_cadence_days_override_rejected(self):
         with pytest.raises(ValueError, match="cadence_days_override"):

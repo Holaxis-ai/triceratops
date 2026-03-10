@@ -1,4 +1,4 @@
-"""LightkurveRawSource — acquire raw photometry from MAST via lightkurve."""
+"""LightkurveSource — acquire and prepare a light curve from MAST via lightkurve."""
 from __future__ import annotations
 
 import logging
@@ -10,19 +10,20 @@ from typing import TYPE_CHECKING, Any
 import numpy as np
 
 from triceratops.lightcurve.config import LightCurveConfig
+from triceratops.lightcurve.convert import convert_folded_to_domain
 from triceratops.lightcurve.errors import (
     DownloadTimeoutError,
+    EphemerisRequiredError,
+    LightCurveEmptyError,
     LightCurveNotFoundError,
-    SectorNotAvailableError,
 )
-from triceratops.lightcurve.raw import RawLightCurveData
+from triceratops.lightcurve.result import LightCurvePreparationResult
 
 if TYPE_CHECKING:
-    import lightkurve as lk
+    from triceratops.lightcurve.ephemeris import Ephemeris
 
 log = logging.getLogger(__name__)
 
-# Cadence → (author, exptime) mapping for MAST search
 _CADENCE_MAP: dict[str, tuple[str, float | None]] = {
     "20sec": ("SPOC", 20.0),
     "2min": ("SPOC", 120.0),
@@ -44,75 +45,103 @@ def _quality_bitmask(quality_mask: str) -> str:
     return {"none": "none", "default": "default", "hard": "hard"}[quality_mask]
 
 
-class LightkurveRawSource:
-    """Raw source backed by MAST via lightkurve.
+class LightkurveSource:
+    """Acquire and prepare a TESS light curve from MAST using lightkurve.
 
-    Does NOT sigma-clip, detrend, fold, or trim.
-    Those are prepare_from_raw()'s job.
+    Uses lightkurve's own fold, sigma-clip, and flatten methods.
+    Returns a compute-ready LightCurvePreparationResult.
     """
 
-    def __init__(
-        self,
-        tic_id: int,
-        _override_collection: Any = None,
-    ) -> None:
+    def __init__(self, tic_id: int, _override_collection: Any = None) -> None:
         self.tic_id = tic_id
         self._override_collection = _override_collection
 
-    def fetch_raw(self, config: LightCurveConfig) -> RawLightCurveData:
+    def prepare(
+        self,
+        ephemeris: Ephemeris,
+        config: LightCurveConfig | None = None,
+    ) -> LightCurvePreparationResult:
+        """Download from MAST, process with lightkurve, return a domain LightCurve.
+
+        Uses lightkurve for: stitch, remove_outliers (upper-only), flatten, fold.
+        Does NOT reimplement any photometry processing.
+        """
+        import astropy.time
         import lightkurve as lk
 
+        config = config or LightCurveConfig()
+
+        if not (np.isfinite(ephemeris.period_days) and ephemeris.period_days > 0):
+            raise EphemerisRequiredError("period_days must be finite and positive")
+        if not (np.isfinite(ephemeris.t0_btjd) and ephemeris.t0_btjd < 10_000):
+            raise EphemerisRequiredError(
+                "t0_btjd must be in BTJD (BJD – 2,457,000); "
+                f"got {ephemeris.t0_btjd} which looks like full JD"
+            )
+
+        # Step 1: Acquire
         if self._override_collection is not None:
             lc_coll = self._override_collection
         else:
             lc_coll = self._search_and_download(config, lk)
 
-        # Step 4: Stitch (normalises each sector by its median)
-        # WARNING: stitch() already normalises. Do NOT call lc.normalize() again.
-        stitched = lc_coll.stitch()
+        # Step 2: Stitch (normalises each sector by median — do NOT normalize() again)
+        lc = lc_coll.stitch()
+        lc = lc.remove_nans()
 
-        # Step 5: Remove NaNs
-        stitched = stitched.remove_nans()
-
-        if len(stitched.time) == 0:
+        if len(lc.time) == 0:
             raise LightCurveNotFoundError(
-                f"TIC {self.tic_id}: all cadences removed by quality mask / NaN removal"
+                f"TIC {self.tic_id}: all cadences removed after stitch/NaN removal"
             )
 
-        # Step 6: Extract sectors used
-        # lightkurve stitch() may or may not preserve sector info in meta;
-        # extract from the collection directly as a fallback
-        sectors_used = self._extract_sectors(lc_coll, stitched)
-
-        # Detect dropped columns and collect warnings
-        warn_list: list[str] = []
-        if "flux_err" not in stitched.colnames:
-            raise LightCurveNotFoundError(
-                f"TIC {self.tic_id}: flux_err column missing after stitch"
+        # Step 3: Upper-only sigma clip (preserves transit dips)
+        if config.sigma_clip is not None:
+            lc = lc.remove_outliers(
+                sigma_upper=config.sigma_clip,
+                sigma_lower=float("inf"),
             )
 
-        # Step 7: Return RawLightCurveData
-        cadence_used = self._resolve_cadence(stitched, config.cadence)
-        exptime = float(stitched.meta.get("TIMEDEL", stitched.meta.get("EXPTIME", 120.0)))
-        # TIMEDEL is in days for TESS, convert to seconds if it looks like days
-        if exptime < 1.0:
-            exptime = exptime * 86400.0
+        # Step 4: Optional detrending
+        if config.detrend_method == "flatten":
+            lc = lc.flatten(
+                window_length=config.flatten_window_length,
+                polyorder=config.flatten_polyorder,
+            )
 
-        return RawLightCurveData(
-            time_btjd=stitched.time.btjd.astype(np.float64),
-            flux=stitched.flux.value.astype(np.float64),
-            flux_err=stitched.flux_err.value.astype(np.float64),
-            sectors=sectors_used,
-            cadence=cadence_used,
-            exptime_seconds=exptime,
-            target_id=self.tic_id,
-            warnings=tuple(warn_list),
+        # Step 5: Phase fold
+        epoch = astropy.time.Time(
+            ephemeris.t0_btjd + 2_457_000.0,
+            format="jd",
+            scale="tdb",
+        )
+        lc_folded = lc.fold(period=ephemeris.period_days, epoch_time=epoch)
+
+        # Step 6: Trim to transit window
+        if ephemeris.duration_hours is not None:
+            half_window = config.phase_window_factor * ephemeris.duration_hours / 24.0
+        else:
+            half_window = ephemeris.period_days * 0.25
+        lc_trimmed = lc_folded[np.abs(lc_folded.phase.value) < half_window]
+
+        if len(lc_trimmed) == 0:
+            raise LightCurveEmptyError(
+                f"TIC {self.tic_id}: no cadences in transit window after fold and trim"
+            )
+
+        # Step 7: Convert to domain type
+        sectors = self._extract_sectors(lc_coll, lc)
+        cadence_used = self._resolve_cadence(lc, config.cadence)
+        lc_domain = convert_folded_to_domain(lc_trimmed, cadence=cadence_used, config=config)
+
+        return LightCurvePreparationResult(
+            light_curve=lc_domain,
+            ephemeris=ephemeris,
+            sectors_used=sectors,
+            cadence_used=cadence_used,
+            warnings=[],
         )
 
-    def _search_and_download(
-        self, config: LightCurveConfig, lk: Any
-    ) -> Any:
-        # Step 1: Search MAST
+    def _search_and_download(self, config: LightCurveConfig, lk: Any) -> Any:
         search_kwargs: dict[str, Any] = {
             "target": f"TIC {self.tic_id}",
             "mission": "TESS",
@@ -130,10 +159,7 @@ class LightkurveRawSource:
                 f"No TESS light curves found for TIC {self.tic_id}"
             )
 
-        # Step 2: Sector selection
         search_filtered = self._select_sectors(search, config.sectors)
-
-        # Step 3: Download with retry-with-backoff
         return self._download_with_retry(
             search_filtered,
             quality_bitmask=_quality_bitmask(config.quality_mask),
@@ -143,20 +169,13 @@ class LightkurveRawSource:
     @staticmethod
     def _select_sectors(search: Any, sectors: Any) -> Any:
         if isinstance(sectors, tuple):
-            # Already filtered in search
             return search
         if sectors == "auto":
-            # Pick the single longest-baseline sector (last available)
             return search[-1:]
-        # "all" — use everything
         return search
 
     @staticmethod
-    def _download_with_retry(
-        search: Any,
-        quality_bitmask: str,
-        flux_column: str,
-    ) -> Any:
+    def _download_with_retry(search: Any, quality_bitmask: str, flux_column: str) -> Any:
         last_err: Exception | None = None
         for attempt in range(_MAX_RETRIES):
             try:
@@ -168,13 +187,9 @@ class LightkurveRawSource:
             except Exception as exc:
                 last_err = exc
                 exc_str = str(exc).lower()
-                retryable = (
-                    "timeout" in exc_str
-                    or "429" in exc_str
-                    or "500" in exc_str
-                    or "502" in exc_str
-                    or "503" in exc_str
-                    or "connection" in exc_str
+                retryable = any(
+                    kw in exc_str
+                    for kw in ("timeout", "429", "500", "502", "503", "connection")
                 )
                 if not retryable:
                     raise
@@ -192,12 +207,10 @@ class LightkurveRawSource:
     @staticmethod
     def _extract_sectors(lc_coll: Any, stitched: Any) -> tuple[int, ...]:
         sectors: set[int] = set()
-        # Try to get from individual LCs in the collection
         for individual_lc in lc_coll:
             sector = individual_lc.meta.get("SECTOR")
             if sector is not None:
                 sectors.add(int(sector))
-        # Fallback: stitched meta
         if not sectors:
             meta_sectors = stitched.meta.get("SECTOR")
             if meta_sectors is not None:
@@ -206,14 +219,13 @@ class LightkurveRawSource:
                 else:
                     sectors.add(int(meta_sectors))
         if not sectors:
-            sectors.add(0)  # unknown sector placeholder
+            sectors.add(0)
         return tuple(sorted(sectors))
 
     @staticmethod
     def _resolve_cadence(stitched: Any, config_cadence: str) -> str:
         if config_cadence != "auto":
             return config_cadence
-        # Auto-detect from EXPTIME/TIMEDEL
         exptime = stitched.meta.get("TIMEDEL", stitched.meta.get("EXPTIME"))
         if exptime is not None:
             exptime_sec = float(exptime)
@@ -226,4 +238,4 @@ class LightkurveRawSource:
             if exptime_sec < 900:
                 return "10min"
             return "30min"
-        return "2min"  # default fallback
+        return "2min"

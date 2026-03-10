@@ -11,11 +11,11 @@ if TYPE_CHECKING:
 
 
 @runtime_checkable
-class RawLightCurveSource(Protocol):
-    """Protocol for fetching raw light-curve data."""
+class LightCurveSource(Protocol):
+    """Protocol for acquiring and preparing a light curve."""
 
-    def fetch_raw(self, config: LightCurveConfig) -> object:
-        """Fetch raw light-curve data for preparation."""
+    def prepare(self, ephemeris: object, config: LightCurveConfig) -> object:
+        """Acquire and return a prepared LightCurvePreparationResult."""
         ...
 
 

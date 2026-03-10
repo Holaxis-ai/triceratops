@@ -1,14 +1,11 @@
 """Light-curve preparation and ephemeris types."""
 
-# Core pipeline
+# Core conversion
 from triceratops.lightcurve.convert import convert_folded_to_domain
-from triceratops.lightcurve.fold import fold_and_clip
-from triceratops.lightcurve.prep import prepare_from_raw
 
 # Types
 from triceratops.lightcurve.config import LightCurveConfig
 from triceratops.lightcurve.ephemeris import Ephemeris, EphemerisResolver, ResolvedTarget
-from triceratops.lightcurve.raw import RawLightCurveData, RawLightCurveSource
 from triceratops.lightcurve.result import LightCurvePreparationResult
 
 # Convenience orchestration
@@ -16,6 +13,10 @@ from triceratops.lightcurve.orchestration import (
     prepare_lightcurve_from_file,
     prepare_lightcurve_from_tic,
 )
+
+# Sources
+from triceratops.lightcurve.sources.file import FileSource
+from triceratops.lightcurve.sources.lightkurve import LightkurveSource
 
 # ExoFOP
 from triceratops.lightcurve.exofop.toi_resolution import ExoFopEphemerisResolver
@@ -32,21 +33,20 @@ from triceratops.lightcurve.errors import (
 )
 
 __all__ = [
-    # Core pipeline
-    "prepare_from_raw",
-    "fold_and_clip",
+    # Core conversion
     "convert_folded_to_domain",
     # Types
     "Ephemeris",
     "ResolvedTarget",
     "EphemerisResolver",
-    "RawLightCurveData",
-    "RawLightCurveSource",
     "LightCurveConfig",
     "LightCurvePreparationResult",
     # Convenience orchestration
     "prepare_lightcurve_from_tic",
     "prepare_lightcurve_from_file",
+    # Sources
+    "LightkurveSource",
+    "FileSource",
     # ExoFOP
     "ExoFopEphemerisResolver",
     # Errors
