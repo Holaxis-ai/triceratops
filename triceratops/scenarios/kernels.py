@@ -86,7 +86,11 @@ def pack_best_indices(
         Integer index array of length min(n_best, N), sorted descending by lnL.
     """
     n_actual = min(n_best, len(lnL))
-    return (-lnL).argsort()[:n_actual]
+    if n_actual >= len(lnL):
+        return (-lnL).argsort()
+    # argpartition is O(N); argsort of only the top-k subset is O(k log k)
+    part = np.argpartition(lnL, -n_actual)[-n_actual:]
+    return part[(-lnL[part]).argsort()]
 
 
 def load_external_lcs(
