@@ -40,6 +40,37 @@ class TestPeriodPlanet:
         result = lnprior_period_planet(5.0, flat_priors=True)
         assert np.isfinite(result)
 
+    def test_lower_clamp_branch(self) -> None:
+        """P_orb < P_min + 0.1 (= 0.2) must be clamped; result equals that at boundary."""
+        # period_days = 0.05 < 0.2 -> P_orb is clamped to 0.2
+        result_below = lnprior_period_planet(0.05)
+        result_at_boundary = lnprior_period_planet(0.2)
+        assert np.isfinite(result_below)
+        # Clamped result must match the boundary value exactly
+        assert result_below == pytest.approx(result_at_boundary, rel=1e-9)
+
+    def test_upper_clamp_branch(self) -> None:
+        """P_orb > P_max - 0.1 (= 49.9) must be clamped; result equals that at boundary."""
+        # period_days = 55.0 > 49.9 -> P_orb is clamped to 49.9
+        result_above = lnprior_period_planet(55.0)
+        result_at_boundary = lnprior_period_planet(49.9)
+        assert np.isfinite(result_above)
+        assert result_above == pytest.approx(result_at_boundary, rel=1e-9)
+
+    def test_lower_clamp_flat_priors(self) -> None:
+        """flat_priors=True lower clamp: P_orb < 0.2 -> clamped to 0.2."""
+        result_below = lnprior_period_planet(0.05, flat_priors=True)
+        result_at_boundary = lnprior_period_planet(0.2, flat_priors=True)
+        assert np.isfinite(result_below)
+        assert result_below == pytest.approx(result_at_boundary, rel=1e-9)
+
+    def test_upper_clamp_flat_priors(self) -> None:
+        """flat_priors=True upper clamp: P_orb > 49.9 -> clamped to 49.9."""
+        result_above = lnprior_period_planet(55.0, flat_priors=True)
+        result_at_boundary = lnprior_period_planet(49.9, flat_priors=True)
+        assert np.isfinite(result_above)
+        assert result_above == pytest.approx(result_at_boundary, rel=1e-9)
+
 
 @pytest.mark.unit
 class TestPeriodBinary:
@@ -50,6 +81,20 @@ class TestPeriodBinary:
     def test_negative_for_large_period(self) -> None:
         result = lnprior_period_binary(45.0)
         assert result < 0
+
+    def test_lower_clamp_branch(self) -> None:
+        """P_orb < P_min + 0.1 (= 0.2) must be clamped to 0.2."""
+        result_below = lnprior_period_binary(0.05)
+        result_at_boundary = lnprior_period_binary(0.2)
+        assert np.isfinite(result_below)
+        assert result_below == pytest.approx(result_at_boundary, rel=1e-9)
+
+    def test_upper_clamp_branch(self) -> None:
+        """P_orb > P_max - 0.1 (= 49.9) must be clamped to 49.9."""
+        result_above = lnprior_period_binary(55.0)
+        result_at_boundary = lnprior_period_binary(49.9)
+        assert np.isfinite(result_above)
+        assert result_above == pytest.approx(result_at_boundary, rel=1e-9)
 
 
 @pytest.mark.unit
