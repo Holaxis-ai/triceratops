@@ -51,8 +51,8 @@ from triceratops.scenarios._companion_helpers import (
     _load_molusc_qs,
     _relations,
 )
+from triceratops.scenarios._eb_branching import build_eb_branch_masks
 from triceratops.scenarios.base import BaseScenario
-from triceratops.scenarios.constants import EB_Q_TWIN_THRESHOLD
 from triceratops.scenarios.kernels import (
     build_transit_mask,
     compute_lnZ,
@@ -564,9 +564,11 @@ class PEBScenario(BaseScenario):
         u1_arr = np.full(N, ldc.u1)
         u2_arr = np.full(N, ldc.u2)
 
-        # q < 0.95 (source: lines 1127-1157)
-        extra_mask = (qs < EB_Q_TWIN_THRESHOLD) & (qs_comp != 0.0)
-        mask = build_transit_mask(incs, ptra, coll, extra_mask=extra_mask)
+        # q < 0.95 / q >= 0.95 branching (source: lines 1127-1186)
+        mask, mask_twin = build_eb_branch_masks(
+            qs, incs, ptra, coll, ptra_twin, coll_twin,
+            extra_mask=(qs_comp != 0.0),
+        )
 
         if np.any(mask):
             # lnL_eb_p returns full-length array (inf for non-masked)
@@ -624,12 +626,6 @@ class PEBScenario(BaseScenario):
                 )
                 ext_lnL = -0.5 * _ln2pi - np.log(elc.sigma) - ext_chi2
                 lnL = lnL + ext_lnL
-
-        # q >= 0.95 twin (source: lines 1159-1186)
-        extra_mask_twin = (qs >= EB_Q_TWIN_THRESHOLD) & (qs_comp != 0.0)
-        mask_twin = build_transit_mask(
-            incs, ptra_twin, coll_twin, extra_mask=extra_mask_twin,
-        )
 
         if np.any(mask_twin):
             # lnL_eb_twin_p returns full-length array (inf for non-masked)
@@ -1357,23 +1353,17 @@ class SEBScenario(BaseScenario):
 
         force_serial = (not config.parallel) and not bool(external_lcs)
 
-        # q < 0.95 (lines 1886-1911)
-        extra_mask = (qs < EB_Q_TWIN_THRESHOLD) & (qs_comp != 0.0)
-        mask = build_transit_mask(
-            samples["incs"], geometry["ptra"], geometry["coll"],
-            extra_mask=extra_mask,
+        # q < 0.95 / q >= 0.95 branching (lines 1886-1943)
+        mask, mask_twin = build_eb_branch_masks(
+            qs, samples["incs"],
+            geometry["ptra"], geometry["coll"],
+            geometry["ptra_twin"], geometry["coll_twin"],
+            extra_mask=(qs_comp != 0.0),
         )
         lnL = self._seb_branch_lnL(
             light_curve, lnsigma, samples, u1s_comp, u2s_comp, mask,
             lnL_fn=lnL_eb_p, a=geometry["a"], period_mult=1,
             force_serial=force_serial,
-        )
-
-        # q >= 0.95 twin (lines 1914-1943)
-        extra_mask_twin = (qs >= EB_Q_TWIN_THRESHOLD) & (qs_comp != 0.0)
-        mask_twin = build_transit_mask(
-            samples["incs"], geometry["ptra_twin"], geometry["coll_twin"],
-            extra_mask=extra_mask_twin,
         )
         lnL_twin = self._seb_branch_lnL(
             light_curve, lnsigma, samples, u1s_comp, u2s_comp, mask_twin,
