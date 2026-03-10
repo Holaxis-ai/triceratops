@@ -52,6 +52,7 @@ from triceratops.scenarios._companion_helpers import (
     _relations,
 )
 from triceratops.scenarios.base import BaseScenario
+from triceratops.scenarios.constants import EB_Q_TWIN_THRESHOLD
 from triceratops.scenarios.kernels import (
     build_transit_mask,
     compute_lnZ,
@@ -564,7 +565,7 @@ class PEBScenario(BaseScenario):
         u2_arr = np.full(N, ldc.u2)
 
         # q < 0.95 (source: lines 1127-1157)
-        extra_mask = (qs < 0.95) & (qs_comp != 0.0)
+        extra_mask = (qs < EB_Q_TWIN_THRESHOLD) & (qs_comp != 0.0)
         mask = build_transit_mask(incs, ptra, coll, extra_mask=extra_mask)
 
         if np.any(mask):
@@ -625,7 +626,7 @@ class PEBScenario(BaseScenario):
                 lnL = lnL + ext_lnL
 
         # q >= 0.95 twin (source: lines 1159-1186)
-        extra_mask_twin = (qs >= 0.95) & (qs_comp != 0.0)
+        extra_mask_twin = (qs >= EB_Q_TWIN_THRESHOLD) & (qs_comp != 0.0)
         mask_twin = build_transit_mask(
             incs, ptra_twin, coll_twin, extra_mask=extra_mask_twin,
         )
@@ -1357,7 +1358,7 @@ class SEBScenario(BaseScenario):
         force_serial = (not config.parallel) and not bool(external_lcs)
 
         # q < 0.95 (lines 1886-1911)
-        extra_mask = (qs < 0.95) & (qs_comp != 0.0)
+        extra_mask = (qs < EB_Q_TWIN_THRESHOLD) & (qs_comp != 0.0)
         mask = build_transit_mask(
             samples["incs"], geometry["ptra"], geometry["coll"],
             extra_mask=extra_mask,
@@ -1369,7 +1370,7 @@ class SEBScenario(BaseScenario):
         )
 
         # q >= 0.95 twin (lines 1914-1943)
-        extra_mask_twin = (qs >= 0.95) & (qs_comp != 0.0)
+        extra_mask_twin = (qs >= EB_Q_TWIN_THRESHOLD) & (qs_comp != 0.0)
         mask_twin = build_transit_mask(
             samples["incs"], geometry["ptra_twin"], geometry["coll_twin"],
             extra_mask=extra_mask_twin,

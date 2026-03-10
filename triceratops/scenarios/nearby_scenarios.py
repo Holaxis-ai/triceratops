@@ -46,10 +46,16 @@ from triceratops.priors.sampling import (
     sample_planet_radius,
 )
 from triceratops.scenarios.base import BaseScenario
+from triceratops.scenarios.constants import (
+    EB_Q_TWIN_THRESHOLD,
+    LN2PI,
+    MAIN_SEQUENCE_LOGG_MIN,
+    MAIN_SEQUENCE_TEFF_MAX,
+)
 from triceratops.scenarios.kernels import build_transit_mask
 from triceratops.stellar.relations import StellarRelations
 
-_ln2pi = np.log(2 * np.pi)
+_ln2pi = LN2PI
 _relations = StellarRelations()
 
 # Fixed logg for evolved star scenarios (subgiant assumption).
@@ -204,7 +210,7 @@ class NTPUnknownScenario(BaseScenario):
         teffs = samples["teffs_possible"][idxs]
 
         # Extra mask: main-sequence filter (logg >= 3.5, Teff <= 10000)
-        ms_mask = (loggs >= 3.5) & (teffs <= 10000)
+        ms_mask = (loggs >= MAIN_SEQUENCE_LOGG_MIN) & (teffs <= MAIN_SEQUENCE_TEFF_MAX)
         mask = build_transit_mask(
             samples["incs"], geometry["Ptra"], geometry["coll"],
             extra_mask=ms_mask,
@@ -426,10 +432,10 @@ class NEBUnknownScenario(BaseScenario):
         lnL_twin = np.full(N, -np.inf)
 
         # Extra mask: main-sequence filter
-        ms_mask = (loggs >= 3.5) & (teffs <= 10000)
+        ms_mask = (loggs >= MAIN_SEQUENCE_LOGG_MIN) & (teffs <= MAIN_SEQUENCE_TEFF_MAX)
 
         # q < 0.95
-        q_lt_mask = qs < 0.95
+        q_lt_mask = qs < EB_Q_TWIN_THRESHOLD
         mask = build_transit_mask(
             samples["incs"], geometry["Ptra"], geometry["coll"],
             extra_mask=q_lt_mask & ms_mask,
@@ -458,7 +464,7 @@ class NEBUnknownScenario(BaseScenario):
         lnL = -0.5 * _ln2pi - lnsigma - chi2_half
 
         # q >= 0.95: twin at 2x period
-        q_ge_mask = qs >= 0.95
+        q_ge_mask = qs >= EB_Q_TWIN_THRESHOLD
         mask_twin = build_transit_mask(
             samples["incs"], geometry["Ptra_twin"], geometry["coll_twin"],
             extra_mask=q_ge_mask & ms_mask,
@@ -813,7 +819,7 @@ class NEBEvolvedScenario(BaseScenario):
         lnL_twin = np.full(N, -np.inf)
 
         # q < 0.95
-        q_lt_mask = qs < 0.95
+        q_lt_mask = qs < EB_Q_TWIN_THRESHOLD
         mask = build_transit_mask(
             samples["incs"], geometry["Ptra"], geometry["coll"],
             extra_mask=q_lt_mask,
@@ -842,7 +848,7 @@ class NEBEvolvedScenario(BaseScenario):
         lnL = -0.5 * _ln2pi - lnsigma - chi2_half
 
         # q >= 0.95: twin at 2x period
-        q_ge_mask = qs >= 0.95
+        q_ge_mask = qs >= EB_Q_TWIN_THRESHOLD
         mask_twin = build_transit_mask(
             samples["incs"], geometry["Ptra_twin"], geometry["coll_twin"],
             extra_mask=q_ge_mask,

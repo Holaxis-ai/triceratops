@@ -60,9 +60,15 @@ from triceratops.scenarios._background_helpers import (
     _sample_population_indices,
 )
 from triceratops.scenarios.base import BaseScenario
+from triceratops.scenarios.constants import (
+    EB_Q_TWIN_THRESHOLD,
+    LN2PI,
+    MAIN_SEQUENCE_LOGG_MIN,
+    MAIN_SEQUENCE_TEFF_MAX,
+)
 from triceratops.scenarios.kernels import build_transit_mask
 
-_ln2pi = np.log(2 * np.pi)
+_ln2pi = LN2PI
 
 
 class DTPScenario(BaseScenario):
@@ -517,7 +523,7 @@ class DEBScenario(BaseScenario):
         comp_fr = fluxratios_comp[idxs]
 
         # q < 0.95: standard EB
-        q_lt_mask = qs < 0.95
+        q_lt_mask = qs < EB_Q_TWIN_THRESHOLD
         mask = build_transit_mask(
             samples["incs"], geometry["Ptra"], geometry["coll"],
             extra_mask=q_lt_mask,
@@ -530,7 +536,7 @@ class DEBScenario(BaseScenario):
         )
 
         # q >= 0.95: twin EB at 2x period
-        q_ge_mask = qs >= 0.95
+        q_ge_mask = qs >= EB_Q_TWIN_THRESHOLD
         mask_twin = build_transit_mask(
             samples["incs"], geometry["Ptra_twin"], geometry["coll_twin"],
             extra_mask=q_ge_mask,
@@ -872,7 +878,7 @@ class BTPScenario(BaseScenario):
         )
 
         # Extra mask: logg >= 3.5 and Teff <= 10000
-        extra_mask = (loggs_comp[idxs] >= 3.5) & (Teffs_comp[idxs] <= 10000)
+        extra_mask = (loggs_comp[idxs] >= MAIN_SEQUENCE_LOGG_MIN) & (Teffs_comp[idxs] <= MAIN_SEQUENCE_TEFF_MAX)
         mask = build_transit_mask(
             samples["incs"], geometry["Ptra"], geometry["coll"],
             extra_mask=extra_mask,
@@ -1295,7 +1301,7 @@ class BEBScenario(BaseScenario):
         )
 
         comp_fr = fluxratios_comp[idxs]
-        extra_logg_teff = (loggs_comp[idxs] >= 3.5) & (Teffs_comp[idxs] <= 10000)
+        extra_logg_teff = (loggs_comp[idxs] >= MAIN_SEQUENCE_LOGG_MIN) & (Teffs_comp[idxs] <= MAIN_SEQUENCE_TEFF_MAX)
 
         comp_params = {
             "u1s_comp": u1s_comp, "u2s_comp": u2s_comp,
@@ -1307,7 +1313,7 @@ class BEBScenario(BaseScenario):
 
         # --- q < 0.95: standard EB ---
         # NC-04 fix: use geometry["coll"] (actual-period collision) not "coll_twin".
-        q_lt_mask = (qs < 0.95) & extra_logg_teff
+        q_lt_mask = (qs < EB_Q_TWIN_THRESHOLD) & extra_logg_teff
         mask = build_transit_mask(
             samples["incs"], geometry["Ptra"], geometry["coll"],
             extra_mask=q_lt_mask,
@@ -1320,7 +1326,7 @@ class BEBScenario(BaseScenario):
         )
 
         # --- q >= 0.95: twin EB at 2x period ---
-        q_ge_mask = (qs >= 0.95) & extra_logg_teff
+        q_ge_mask = (qs >= EB_Q_TWIN_THRESHOLD) & extra_logg_teff
         mask_twin = build_transit_mask(
             samples["incs"], geometry["Ptra_twin"], geometry["coll_twin"],
             extra_mask=q_ge_mask,

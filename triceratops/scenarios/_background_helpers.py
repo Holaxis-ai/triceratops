@@ -10,6 +10,10 @@ import numpy as np
 
 from triceratops.population.protocols import TRILEGALResult
 from triceratops.priors.lnpriors import lnprior_background
+from triceratops.scenarios.constants import (
+    ARCSEC_TO_DEG,
+    COMPANION_DEFAULT_SEP_ARCSEC,
+)
 from triceratops.stellar.relations import StellarRelations
 
 _relations = StellarRelations()
@@ -183,7 +187,7 @@ def _compute_lnprior_companion(
         # Recompute delta_mags from flux ratios for the drawn samples
         fr = fluxratios_comp[idxs]
         delta_mags_drawn = 2.5 * np.log10(fr / (1 - fr))
-        lnprior = np.full(n, np.log((n_comp / 0.1) * (1 / 3600) ** 2 * 2.2**2))
+        lnprior = np.full(n, np.log((n_comp / 0.1) * ARCSEC_TO_DEG**2 * COMPANION_DEFAULT_SEP_ARCSEC**2))
         lnprior[lnprior > 0.0] = 0.0
         lnprior[delta_mags_drawn > 0.0] = -np.inf
         return lnprior
@@ -220,7 +224,7 @@ def _compute_bright_background_lnprior(
     )
 
     if contrast_curve is None:
-        lnprior = np.full(n, np.log((n_comp / 0.1) * (1 / 3600) ** 2 * 2.2**2))
+        lnprior = np.full(n, np.log((n_comp / 0.1) * ARCSEC_TO_DEG**2 * COMPANION_DEFAULT_SEP_ARCSEC**2))
     else:
         separations = contrast_curve.separations_arcsec  # type: ignore[union-attr]
         contrasts = contrast_curve.delta_mags  # type: ignore[union-attr]

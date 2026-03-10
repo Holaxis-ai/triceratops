@@ -13,11 +13,17 @@ import numpy as np
 from pandas import read_csv
 
 from triceratops.priors.lnpriors import lnprior_bound_companion
+from triceratops.scenarios.constants import (
+    COMPANION_DEFAULT_SEP_ARCSEC,
+    LN2PI,
+)
 from triceratops.stellar.relations import StellarRelations
 
 _relations = StellarRelations()
 
-_ln2pi = np.log(2 * np.pi)
+# Re-exported so companion_scenarios.py can import _ln2pi from this module
+# without an import cycle.
+_ln2pi = LN2PI
 
 
 def _load_molusc_qs(
@@ -107,7 +113,7 @@ def _compute_companion_prior(
         delta_mags = 2.5 * np.log10(fluxratios_comp / (1 - fluxratios_comp))
         lnprior_comp = lnprior_bound_companion(
             delta_mags=np.abs(delta_mags),
-            separations_arcsec=np.array([2.2]),
+            separations_arcsec=np.array([COMPANION_DEFAULT_SEP_ARCSEC]),
             contrasts=np.array([1.0]),
             primary_mass_msun=M_s,
             parallax_mas=plx,
@@ -189,7 +195,7 @@ def _compute_seb_companion_prior(
         )
         lnprior_comp = lnprior_bound_companion(
             delta_mags=np.abs(delta_mags),
-            separations_arcsec=np.array([2.2]),
+            separations_arcsec=np.array([COMPANION_DEFAULT_SEP_ARCSEC]),
             contrasts=np.array([1.0]),
             primary_mass_msun=M_s,
             parallax_mas=plx,
