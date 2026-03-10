@@ -14,6 +14,7 @@ from __future__ import annotations
 import os
 from collections.abc import Sequence
 from concurrent.futures import ProcessPoolExecutor
+from dataclasses import dataclass, field
 
 import numpy as np
 
@@ -21,9 +22,34 @@ from triceratops.config.config import Config
 from triceratops.domain.entities import ExternalLightCurve, LightCurve, Star, StellarField
 from triceratops.domain.result import ScenarioResult, ValidationResult
 from triceratops.domain.scenario_id import ScenarioID
-from triceratops.domain.value_objects import ContrastCurve
+from triceratops.domain.value_objects import ContrastCurve, StellarParameters
+from triceratops.population.protocols import TRILEGALResult
 from triceratops.scenarios.base import Scenario
 from triceratops.scenarios.registry import DEFAULT_REGISTRY, ScenarioRegistry
+
+
+@dataclass
+class ScenarioExecutionContext:
+    """All inputs needed to execute a single scenario.
+
+    Replaces the fragile (scenario, lc, params, ...) tuple previously
+    passed to the parallel worker function.
+    """
+
+    scenario: Scenario
+    light_curve: LightCurve
+    stellar_params: StellarParameters
+    period_days: float | list[float]
+    config: Config
+    external_lcs: list[ExternalLightCurve] = field(default_factory=list)
+    # Scenario-specific kwargs (kept as dict for backward compat with **kwargs pattern)
+    contrast_curve: ContrastCurve | None = None
+    trilegal_population: TRILEGALResult | None = None
+    host_magnitudes: dict = field(default_factory=dict)
+    target_tmag: float | None = None
+    external_lc_bands: tuple = ()
+    filt: str | None = None
+    molusc_file: str | None = None
 
 
 def _worker_initializer() -> None:
@@ -46,13 +72,7 @@ def _worker_initializer() -> None:
 
 
 def _scenario_worker(
-    scenario: Scenario,
-    light_curve: LightCurve,
-    stellar_params: object,
-    period_days: float | list[float],
-    config: Config,
-    external_lcs: list[ExternalLightCurve] | None,
-    kwargs: dict,
+    ctx: ScenarioExecutionContext,
 ) -> ScenarioResult | tuple[ScenarioResult, ScenarioResult]:
     """Top-level worker function for ProcessPoolExecutor.
 
@@ -62,12 +82,21 @@ def _scenario_worker(
     Each worker process receives an independent OS-entropy RNG seed on spawn,
     so no explicit np.random.seed() call is needed for correctness.
     """
-    return scenario.compute(
-        light_curve=light_curve,
-        stellar_params=stellar_params,
-        period_days=period_days,
-        config=config,
-        external_lcs=external_lcs,
+    kwargs: dict = {
+        "contrast_curve": ctx.contrast_curve,
+        "filt": ctx.filt,
+        "molusc_file": ctx.molusc_file,
+        "trilegal_population": ctx.trilegal_population,
+        "host_magnitudes": ctx.host_magnitudes,
+        "external_lc_bands": ctx.external_lc_bands,
+        "target_tmag": ctx.target_tmag,
+    }
+    return ctx.scenario.compute(
+        light_curve=ctx.light_curve,
+        stellar_params=ctx.stellar_params,
+        period_days=ctx.period_days,
+        config=ctx.config,
+        external_lcs=ctx.external_lcs if ctx.external_lcs else None,
         **kwargs,
     )
 
@@ -175,14 +204,17 @@ class ValidationEngine:
 
         nearby_ids = ScenarioID.nearby_scenarios()
         tasks = [
-            (
-                scenario,
-                light_curve if scenario.scenario_id in nearby_ids else renormed_target_lc,
-                stellar_params,
-                period_days,
-                config,
-                external_lcs,
-                shared_kwargs,
+            ScenarioExecutionContext(
+                scenario=scenario,
+                light_curve=(
+                    light_curve if scenario.scenario_id in nearby_ids
+                    else renormed_target_lc
+                ),
+                stellar_params=stellar_params,
+                period_days=period_days,
+                config=config,
+                external_lcs=external_lcs or [],
+                **shared_kwargs,
             )
             for scenario in scenarios_to_run
         ]
@@ -190,7 +222,7 @@ class ValidationEngine:
         all_results: list[ScenarioResult] = []
         if config.n_workers == 0:
             for task in tasks:
-                result_or_tuple = _scenario_worker(*task)
+                result_or_tuple = _scenario_worker(task)
                 if isinstance(result_or_tuple, tuple):
                     all_results.extend(result_or_tuple)
                 else:
@@ -202,7 +234,7 @@ class ValidationEngine:
                 else min(config.n_workers, len(tasks))
             )
             with ProcessPoolExecutor(max_workers=n_workers, initializer=_worker_initializer) as pool:
-                futures = [pool.submit(_scenario_worker, *task) for task in tasks]
+                futures = [pool.submit(_scenario_worker, task) for task in tasks]
                 for future in futures:
                     result_or_tuple = future.result()
                     if isinstance(result_or_tuple, tuple):
