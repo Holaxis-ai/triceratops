@@ -525,19 +525,26 @@ class TestBEBOrbitalGeometry:
 
 
 # ---------------------------------------------------------------------------
-# BEB Tests -- legacy parallel-path parity
+# BEB Tests -- NC-04 collision mask correctness
 # ---------------------------------------------------------------------------
 
-class TestBEBLegacyParallelMask:
-    """Original BEB parallel path used coll_twin for the q<0.95 branch."""
+class TestBEBCollisionMask:
+    """NC-04: BEBScenario q<0.95 branch must use geometry['coll'], not 'coll_twin'."""
 
     @patch(f"{_LNL_MOD}.lnL_eb_p", side_effect=_mock_lnL_eb_p)
     @patch(f"{_LNL_MOD}.lnL_eb_twin_p", side_effect=_mock_lnL_eb_twin_p)
-    def test_q_lt_95_uses_coll_twin_in_parallel_path(
+    def test_q_lt_95_uses_coll_not_coll_twin(
         self, _m_twin, _m_eb, transit_lc, stellar_params,
         mock_population, host_mags,
     ) -> None:
-        """With coll=False, coll_twin=True: q<0.95 stays masked out."""
+        """NC-04: q<0.95 is gated by coll (actual-period) not coll_twin (twin-period).
+
+        Set coll=all_True, coll_twin=all_False.
+        - q<0.95 draws: coll=True blocks them → lnL should be -inf
+        - q>=0.95 draws: coll_twin=False passes them → lnL_twin should be finite
+        If the bug were present (coll_twin used for q<0.95), q<0.95 draws
+        would NOT be masked (coll_twin=False), so lnL would be finite — wrong.
+        """
         s = BEBScenario(FixedLDCCatalog())
         cfg = Config(n_mc_samples=100, n_best_samples=10)
         P_orb = np.full(100, 5.0)
@@ -553,9 +560,9 @@ class TestBEBLegacyParallelMask:
             samples, P_orb, stellar_params, cfg,
         )
 
-        # Override geometry: coll=all_False, coll_twin=all_True
-        geometry["coll"] = np.zeros(100, dtype=bool)
-        geometry["coll_twin"] = np.ones(100, dtype=bool)
+        # Override geometry: coll=all_True (blocks q<0.95), coll_twin=all_False (passes q>=0.95)
+        geometry["coll"] = np.ones(100, dtype=bool)
+        geometry["coll_twin"] = np.zeros(100, dtype=bool)
 
         ldc = s._get_host_ldc(stellar_params, "TESS", P_orb, {})
         lnL, lnL_twin = s._evaluate_lnL(
@@ -563,17 +570,19 @@ class TestBEBLegacyParallelMask:
             ldc, [], cfg,
         )
 
-        # Original parallel path used coll_twin for q<0.95 too.
+        # q<0.95: coll=True must block all draws → lnL must be -inf
         q_lt_95 = samples["qs"] < 0.95
         if np.any(q_lt_95):
-            assert np.all(lnL[q_lt_95] == -np.inf), \
-                "Legacy BEB parity regression: q<0.95 should be masked by coll_twin"
+            assert np.all(lnL[q_lt_95] == -np.inf), (
+                "NC-04 regression: q<0.95 draws should be masked by coll=True"
+            )
 
-        # q>=0.95 samples should be all -inf (coll_twin is True)
+        # q>=0.95: coll_twin=False must pass draws (some may be finite after prior)
         q_ge_95 = samples["qs"] >= 0.95
         if np.any(q_ge_95):
-            assert np.all(lnL_twin[q_ge_95] == -np.inf), \
-                "q>=0.95 should be -inf because coll_twin=True"
+            assert not np.all(lnL_twin[q_ge_95] == -np.inf), (
+                "q>=0.95 draws should NOT all be -inf when coll_twin=False"
+            )
 
 
 # ---------------------------------------------------------------------------

@@ -9,8 +9,9 @@ Source: marginal_likelihoods.py:2058-2380 (lnZ_DTP), 2382-2820 (lnZ_DEB),
 BUG-04 fix: _compute_delta_mags_map() correctly maps "delta_Kmags" to
 target_kmag - population.kmags (the original mapped it to delta_Hmags).
 
-BUG-06 fix: BEBScenario._evaluate_lnL uses geometry['coll'] (not coll_twin)
-for the q<0.95 mask. The original code at ~line 3492 incorrectly used coll_twin.
+BUG-06 fix (NC-04): BEBScenario._evaluate_lnL uses geometry['coll'] (not
+coll_twin) for the q<0.95 mask. The original code at ~line 3492 incorrectly
+used coll_twin; this was temporarily reverted for parity and is now corrected.
 """
 # ruff: noqa: ARG002  -- ABC override signatures require unused params
 from __future__ import annotations
@@ -1558,9 +1559,10 @@ class BEBScenario(BaseScenario):
         force_serial = (not config.parallel) and not bool(external_lcs)
 
         # --- q < 0.95: standard EB ---
+        # NC-04 fix: use geometry["coll"] (actual-period collision) not "coll_twin".
         q_lt_mask = (qs < 0.95) & extra_logg_teff
         mask = build_transit_mask(
-            samples["incs"], geometry["Ptra"], geometry["coll_twin"],
+            samples["incs"], geometry["Ptra"], geometry["coll"],
             extra_mask=q_lt_mask,
         )
         lnL = self._beb_branch_lnL(

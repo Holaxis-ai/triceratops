@@ -210,6 +210,96 @@ at the commit that applies this fix.
 
 ---
 
+## NC-04 — BEBScenario: coll_twin → coll for q < 0.95 collision mask
+
+**Commit:** (pending)
+**Date:** 2026-03-09
+**Status:** Applied
+**Affects FPP:** Yes in principle (BEB/BEBx2P lnZ decreases), but the
+magnitude is below Monte Carlo noise at n=10,000 — FPP is unchanged
+at 4 significant figures for both TOI-4051 and TOI-4155.
+**Affects NFPP:** No (nearby-star scenarios are unaffected)
+
+### Affected scenarios
+
+BEB, BEBx2P — the two scenarios produced by `BEBScenario._evaluate_lnL`.
+The q < 0.95 branch (standard period EB) uses an incorrect collision check;
+the q >= 0.95 branch (twin, 2x period) was already correct.
+
+### The bug
+
+`BEBScenario._evaluate_lnL` has two branches:
+
+- **q < 0.95** — standard EB at the observed period `P_orb`
+- **q >= 0.95** — equal-mass twin EB at `2 × P_orb`
+
+Each branch needs a separate collision check because the orbital semi-major
+axis `a` differs between the two periods (Kepler's third law: `a ∝ P^(2/3)`).
+
+The correct checks are:
+
+```python
+coll      = collision_check(a,      R_EB, R_comp, eccs)  # standard-period orbit
+coll_twin = (2 * R_comp * Rsun) > a_twin * (1 - eccs)    # twin-period orbit
+```
+
+The original TRICERATOPS+ code (marginal_likelihoods.py line ~3492) and
+the triceratops-fast code (before this fix) both apply `coll_twin` to the
+q < 0.95 branch:
+
+```python
+# BUG: q < 0.95 branch uses coll_twin instead of coll
+mask = (incs >= inc_min) & (coll_twin == False) & (qs < 0.95)
+```
+
+`coll_twin` tests whether the *twin* orbit (at `2 × P_orb`, larger `a_twin`)
+would collide, which is a **less restrictive** criterion than `coll` for the
+actual standard-period orbit.  Because `a_twin > a`, `coll_twin` triggers
+less often, so the q < 0.95 mask admits draws that would be excluded by the
+correct collision criterion.  This over-counts physically impossible BEB
+configurations, inflating BEB and BEBx2P lnZ.
+
+Note: `DEBScenario._evaluate_lnL` (line ~774) already uses `geometry["coll"]`
+for the q < 0.95 branch and is correct.
+
+### The fix
+
+Change `geometry["coll_twin"]` to `geometry["coll"]` in the
+`BEBScenario._evaluate_lnL` q < 0.95 block:
+
+```python
+# Fixed: q < 0.95 uses the standard-period collision check
+mask = build_transit_mask(
+    samples["incs"], geometry["Ptra"], geometry["coll"],  # coll, not coll_twin
+    extra_mask=q_lt_mask,
+)
+```
+
+No other logic changes required.
+
+### Observed FPP shift
+
+The number of BEB draws with `coll == True` but `coll_twin == False` (the
+only draws affected by this fix) is zero for both test targets at n=10,000,
+seed=42.  FPP is unchanged at 4 significant figures:
+
+| Target   | FPP before | FPP after |
+|----------|-----------|-----------|
+| TOI-4051 | 0.9961    | 0.9961    |
+| TOI-4155 | 0.01550   | 0.01550   |
+
+The fix is still correct — it removes a logically wrong criterion — but the
+magnitude is below Monte Carlo noise at n=10,000 for these targets.  At
+n=1,000,000 draws or in highly crowded fields with short-period BEB
+candidates a measurable shift may emerge.  Golden JSON files are unchanged.
+
+### Call site
+
+- `triceratops/scenarios/background_scenarios.py` — `BEBScenario._evaluate_lnL`,
+  q < 0.95 block, `build_transit_mask(... geometry["coll_twin"] ...)` → `geometry["coll"]`
+
+---
+
 *To add a new entry: copy the template below, fill in all fields, and commit
 the updated golden JSON files in the same PR.*
 
