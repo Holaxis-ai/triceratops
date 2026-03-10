@@ -40,7 +40,7 @@ class ScenarioExecutionContext:
     scenario: Scenario
     light_curve: LightCurve
     stellar_params: StellarParameters
-    period_days: float | list[float]
+    period_days: float | list[float] | tuple[float, float]
     config: Config
     external_lcs: list[ExternalLightCurve] = field(default_factory=list)
     # Scenario-specific kwargs (kept as dict for backward compat with **kwargs pattern)
@@ -130,7 +130,7 @@ class ValidationEngine:
         self,
         light_curve: LightCurve,
         stellar_field: StellarField,
-        period_days: float | list[float],
+        period_days: float | list[float] | tuple[float, float],
         config: Config,
         scenario_ids: Sequence[ScenarioID] | None = None,
         external_lcs: list[ExternalLightCurve] | None = None,

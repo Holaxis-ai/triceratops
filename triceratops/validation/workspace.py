@@ -159,7 +159,7 @@ class ValidationWorkspace:
     def compute_probs(
         self,
         light_curve: LightCurve,
-        period_days: float | list[float],
+        period_days: float | list[float] | tuple[float, float],
         scenario_ids: list[ScenarioID] | None = None,
         external_lcs: list[ExternalLightCurve] | None = None,
         contrast_curve: ContrastCurve | None = None,

@@ -86,7 +86,7 @@ class PreparedValidationInputs:
     stellar_field: StellarField
     light_curve: LightCurve
     config: Config
-    period_days: float | list[float]
+    period_days: float | list[float] | tuple[float, float]
     trilegal_population: TRILEGALResult | None = None
     external_lcs: list[ExternalLightCurve] | None = None
     contrast_curve: ContrastCurve | None = None
@@ -175,27 +175,18 @@ class PreparedValidationInputs:
 
         # 5. TRILEGAL population must be present for explicitly-requested TRILEGAL scenarios.
         #
-        # Only checked when scenario_ids is explicitly set.  When scenario_ids=None
-        # the engine uses its own (possibly custom) registry, which validate() cannot
-        # access; the workspace/preparer already materialises the population before
-        # calling compute_prepared(), so the check there would be redundant and would
-        # incorrectly fire for tests that use a custom registry without TRILEGAL scenarios.
-        if self.scenario_ids is not None and self.trilegal_population is None:
-            from triceratops.domain.scenario_id import ScenarioID
-            from triceratops.scenarios.registry import DEFAULT_REGISTRY
-            trilegal_ids = set(ScenarioID.trilegal_scenarios())
-            active_scenarios = [
-                s for sid in self.scenario_ids
-                if (s := DEFAULT_REGISTRY.get_or_none(sid)) is not None
-            ]
-            missing = [s.scenario_id for s in active_scenarios
-                       if s.scenario_id in trilegal_ids]
-            if missing:
-                raise PreparedInputIncompleteError(
-                    f"trilegal_population is required for scenarios {missing} but was not provided. "
-                    "Pass a population_provider to ValidationPreparer or ValidationWorkspace, "
-                    "or exclude TRILEGAL-dependent scenarios via scenario_ids."
-                )
+        # This check is intentionally deferred to ValidationEngine.compute_prepared(),
+        # which uses the engine's actual (possibly custom) registry to determine which
+        # scenarios will run.  Checking here would require resolving scenario IDs through
+        # a registry — but validate() has no registry reference, and hard-coding
+        # DEFAULT_REGISTRY here leaks default-registry assumptions into custom-registry
+        # flows (e.g. a payload with scenario_ids=[BTP] would fire even if the engine's
+        # registry does not register BTP, producing the wrong error type before the
+        # "unknown scenario" ValueError fires).
+        #
+        # The engine-level check in compute_prepared() covers both the explicit and
+        # scenario_ids=None cases and always uses self._registry, so no check is needed
+        # here for correctness.
 
 
 @dataclass

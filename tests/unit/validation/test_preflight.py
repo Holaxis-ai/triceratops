@@ -207,43 +207,58 @@ class TestInvalidPeriodDays:
 
 # ---------------------------------------------------------------------------
 # Phase 2: missing TRILEGAL for explicit TRILEGAL scenario_ids
+#
+# The TRILEGAL check lives in ValidationEngine.compute_prepared(), not in
+# PreparedValidationInputs.validate().  validate() has no registry reference;
+# putting the check there would hard-code DEFAULT_REGISTRY and produce the
+# wrong error type when a custom engine registry does not register a given
+# TRILEGAL scenario (PreparedInputIncompleteError fires before the "unknown
+# scenario" ValueError).  The engine-level check uses self._registry and
+# covers both explicit and scenario_ids=None cases.
 # ---------------------------------------------------------------------------
 
 
 class TestMissingTrilegalPopulation:
     def test_trilegal_scenario_without_population_raises(self) -> None:
-        """Explicit TRILEGAL scenario_ids with no population raises."""
+        """Explicit TRILEGAL scenario_ids with no population raises via engine."""
+        from triceratops.validation.engine import ValidationEngine
+
         registered_trilegal = [
             sid for sid in ScenarioID.trilegal_scenarios()
             if sid in (ScenarioID.BTP, ScenarioID.BEB)
         ]
         assert registered_trilegal, "Need registered TRILEGAL scenarios for this test"
 
+        engine = ValidationEngine()  # DEFAULT_REGISTRY — has BTP/BEB
         payload = _valid_payload(
             scenario_ids=registered_trilegal,
             trilegal_population=None,
         )
         with pytest.raises(PreparedInputIncompleteError, match="trilegal_population"):
-            payload.validate()
+            engine.compute_prepared(payload)
 
     def test_error_message_names_missing_scenarios(self) -> None:
+        """Error message from engine TRILEGAL check names the missing scenario IDs."""
+        from triceratops.validation.engine import ValidationEngine
+
+        engine = ValidationEngine()  # DEFAULT_REGISTRY — has BTP
         payload = _valid_payload(
             scenario_ids=[ScenarioID.BTP],
             trilegal_population=None,
         )
         with pytest.raises(PreparedInputIncompleteError) as exc_info:
-            payload.validate()
+            engine.compute_prepared(payload)
         assert "BTP" in str(exc_info.value)
 
-    def test_non_trilegal_scenario_without_population_passes(self) -> None:
-        """Non-TRILEGAL scenario_ids should not trigger the population check."""
+    def test_non_trilegal_scenario_without_population_passes_validate(self) -> None:
+        """Non-TRILEGAL scenario_ids do not trigger the population check in validate()."""
         _valid_payload(
             scenario_ids=[ScenarioID.TP],
             trilegal_population=None,
         ).validate()
 
-    def test_trilegal_scenario_with_population_passes(self) -> None:
-        """Providing a population satisfies the check."""
+    def test_trilegal_scenario_with_population_passes_validate(self) -> None:
+        """validate() accepts a payload with TRILEGAL scenario + population present."""
         from unittest.mock import MagicMock
         pop = MagicMock()
         _valid_payload(
@@ -251,6 +266,6 @@ class TestMissingTrilegalPopulation:
             trilegal_population=pop,
         ).validate()
 
-    def test_scenario_ids_none_does_not_check_trilegal(self) -> None:
-        """When scenario_ids=None the TRILEGAL check is deferred to the engine."""
+    def test_scenario_ids_none_does_not_check_trilegal_in_validate(self) -> None:
+        """validate() never checks TRILEGAL — the check lives in the engine."""
         _valid_payload(scenario_ids=None, trilegal_population=None).validate()
