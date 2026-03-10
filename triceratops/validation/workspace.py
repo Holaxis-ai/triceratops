@@ -178,7 +178,20 @@ class ValidationWorkspace:
         Returns:
             ValidationResult, also stored internally for property access.
         """
+        from triceratops.validation.errors import UnsupportedComputeModeError
         from triceratops.validation.job import PreparedValidationInputs
+
+        # Mission gate — fail before any provider IO.
+        # validate() on the payload would catch this too, but that fires after
+        # TRILEGAL may already have been fetched.  Check here so non-TESS calls
+        # never trigger avoidable network/filesystem work.
+        if self.mission != "TESS":
+            raise UnsupportedComputeModeError(
+                f"compute_probs() only supports mission='TESS'. "
+                f"This workspace was constructed with mission={self.mission!r}. "
+                "Kepler/K2 support is experimental and not available for "
+                "prepared compute jobs."
+            )
 
         self._last_light_curve = light_curve
 

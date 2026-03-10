@@ -108,6 +108,65 @@ class TestComputeBoundaryMissionGate:
 
 
 # ---------------------------------------------------------------------------
+# Workspace: mission gate fires before any provider IO
+# ---------------------------------------------------------------------------
+
+
+class TestWorkspaceMissionGate:
+    def _make_workspace(self, mission: str) -> object:
+        from unittest.mock import MagicMock
+        from triceratops.validation.workspace import ValidationWorkspace
+
+        catalog = MagicMock()
+        catalog.query_nearby_stars.return_value = _field(mission=mission)
+        ws = ValidationWorkspace(
+            tic_id=12345,
+            sectors=np.array([1]),
+            mission=mission,
+            catalog_provider=catalog,
+        )
+        return ws
+
+    def test_tess_workspace_passes_gate(self) -> None:
+        """TESS workspace compute_probs() does not raise at the mission gate."""
+        from triceratops.scenarios.registry import ScenarioRegistry
+        from triceratops.validation.engine import ValidationEngine
+
+        ws = self._make_workspace("TESS")
+        ws._engine._registry = ScenarioRegistry()  # empty — no scenarios run
+        # Should reach compute_prepared() without raising UnsupportedComputeModeError
+        result = ws.compute_probs(_lc(), period_days=5.0)
+        assert result is not None
+
+    def test_kepler_workspace_raises_before_trilegal(self) -> None:
+        """Non-TESS compute_probs() must fail before triggering provider IO."""
+        from unittest.mock import MagicMock
+        from triceratops.validation.workspace import ValidationWorkspace
+
+        catalog = MagicMock()
+        catalog.query_nearby_stars.return_value = _field(mission="Kepler")
+        population = MagicMock()
+
+        ws = ValidationWorkspace(
+            tic_id=12345,
+            sectors=np.array([1]),
+            mission="Kepler",
+            catalog_provider=catalog,
+            population_provider=population,
+        )
+
+        with pytest.raises(UnsupportedComputeModeError):
+            ws.compute_probs(_lc(), period_days=5.0)
+
+        population.query.assert_not_called()
+
+    def test_k2_workspace_raises(self) -> None:
+        ws = self._make_workspace("K2")
+        with pytest.raises(UnsupportedComputeModeError):
+            ws.compute_probs(_lc(), period_days=5.0)
+
+
+# ---------------------------------------------------------------------------
 # Prep boundary: ValidationPreparer.prepare()
 # ---------------------------------------------------------------------------
 

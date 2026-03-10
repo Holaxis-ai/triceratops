@@ -154,8 +154,8 @@ class ValidationPreparer:
             from triceratops.validation.errors import UnsupportedComputeModeError
             raise UnsupportedComputeModeError(
                 f"prepare() only supports mission='TESS'. Got {mission!r}. "
-                "Kepler/K2 support is experimental; pass mission='TESS' or "
-                "construct PreparedValidationInputs directly for non-TESS testing."
+                "Kepler/K2 support is experimental and not available for "
+                "prepared compute jobs."
             )
 
         # ---- 1. Validate scenario_ids against the registry ----
