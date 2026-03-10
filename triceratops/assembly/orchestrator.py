@@ -29,7 +29,7 @@ if TYPE_CHECKING:
     )
     from triceratops.domain.molusc import MoluscData
     from triceratops.domain.value_objects import ContrastCurve
-    from triceratops.lightcurve.ephemeris import ResolvedTarget
+    from triceratops.lightcurve.ephemeris import EphemerisResolver, ResolvedTarget
     from triceratops.population.protocols import PopulationSynthesisProvider, TRILEGALResult
 
 
@@ -50,6 +50,7 @@ class DataAssemblyOrchestrator:
         self,
         *,
         catalog_provider: StarCatalogProvider,
+        ephemeris_resolver: EphemerisResolver | None = None,
         lc_source: LightCurveSource | None = None,
         population_provider: PopulationSynthesisProvider | None = None,
         aperture_provider: ApertureProvider | None = None,
@@ -60,6 +61,7 @@ class DataAssemblyOrchestrator:
         registry: ScenarioRegistry | None = None,
     ) -> None:
         self._catalog = catalog_provider
+        self._ephemeris_resolver = ephemeris_resolver
         self._lc_source = lc_source
         self._population = population_provider
         self._aperture = aperture_provider

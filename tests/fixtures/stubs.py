@@ -159,3 +159,37 @@ class StubPopulationSynthesisProvider:
             imags=np.asarray(df["imag"]),
             zmags=np.asarray(df["zmag"]),
         )
+
+
+class StubEphemerisResolver:
+    """Returns a fixed ResolvedTarget without any network calls.
+
+    Use this anywhere an EphemerisResolver is required in tests.
+    """
+
+    def __init__(
+        self,
+        tic_id: int = 12345678,
+        period_days: float = 3.5,
+        t0_btjd: float = 1500.0,
+        duration_hours: float = 2.5,
+    ) -> None:
+        self._tic_id = tic_id
+        self._period_days = period_days
+        self._t0_btjd = t0_btjd
+        self._duration_hours = duration_hours
+
+    def resolve(self, target: str) -> ResolvedTarget:
+        from triceratops.lightcurve.ephemeris import Ephemeris, ResolvedTarget
+
+        return ResolvedTarget(
+            target_ref=target,
+            tic_id=self._tic_id,
+            ephemeris=Ephemeris(
+                period_days=self._period_days,
+                t0_btjd=self._t0_btjd,
+                duration_hours=self._duration_hours,
+                source="stub",
+            ),
+            source="stub",
+        )

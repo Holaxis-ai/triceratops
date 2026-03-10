@@ -11,6 +11,7 @@ from typing import Protocol, runtime_checkable
 import numpy as np
 
 from triceratops.domain.entities import StellarField
+from triceratops.lightcurve.ephemeris import EphemerisResolver
 
 
 @runtime_checkable
@@ -63,3 +64,10 @@ class ApertureProvider(Protocol):
             List of 2D arrays of shape (size_px, size_px). One per sector.
         """
         ...
+
+
+__all__ = [
+    "StarCatalogProvider",
+    "ApertureProvider",
+    "EphemerisResolver",
+]

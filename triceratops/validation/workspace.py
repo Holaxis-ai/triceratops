@@ -14,7 +14,7 @@ from typing import TYPE_CHECKING
 import numpy as np
 
 from triceratops.catalog.flux_contributions import compute_flux_ratios, compute_transit_depths
-from triceratops.catalog.protocols import ApertureProvider, StarCatalogProvider
+from triceratops.catalog.protocols import ApertureProvider, EphemerisResolver, StarCatalogProvider
 from triceratops.config.config import Config
 from triceratops.domain.entities import ExternalLightCurve, LightCurve, Star, StellarField
 from triceratops.domain.result import ValidationResult
@@ -25,6 +25,7 @@ from triceratops.validation.engine import ValidationEngine
 
 if TYPE_CHECKING:
     from triceratops.domain.molusc import MoluscData
+    from triceratops.lightcurve.ephemeris import ResolvedTarget
 
 
 class ValidationWorkspace:
@@ -48,6 +49,7 @@ class ValidationWorkspace:
         catalog_provider: StarCatalogProvider | None = None,
         aperture_provider: ApertureProvider | None = None,
         population_provider: PopulationSynthesisProvider | None = None,
+        ephemeris_resolver: EphemerisResolver | None = None,
         trilegal_cache_path: str | None = None,
     ) -> None:
         self.tic_id = tic_id
@@ -56,6 +58,7 @@ class ValidationWorkspace:
         self.search_radius = search_radius
         self.config = config or Config(mission=mission)
         self._trilegal_cache_path = trilegal_cache_path
+        self._ephemeris_resolver = ephemeris_resolver
 
         if catalog_provider is None:
             from triceratops.catalog.mast_provider import MASTCatalogProvider
@@ -111,6 +114,7 @@ class ValidationWorkspace:
             catalog_provider=self._catalog_provider,
             population_provider=self._population_provider,
             aperture_provider=self._aperture_provider,
+            ephemeris_resolver=self._ephemeris_resolver,
         )
         self._resolved_target = ResolvedTarget(
             target_ref=str(tic_id),
@@ -169,6 +173,24 @@ class ValidationWorkspace:
         """
         self._stellar_field.update_star(tic_id, **kwargs)
         self._last_result = None
+
+    # -- Ephemeris resolution --
+
+    def resolve_target(self, target: str) -> ResolvedTarget:
+        """Resolve a target string (e.g. TOI number) using the injected resolver.
+
+        Raises:
+            RuntimeError: If no ephemeris_resolver was provided.
+            LightCurveError: If resolution fails (propagated from resolver).
+        """
+        if self._ephemeris_resolver is None:
+            raise RuntimeError(
+                "No ephemeris_resolver was provided to ValidationWorkspace. "
+                "Pass one at construction time or resolve the target externally."
+            )
+        resolved = self._ephemeris_resolver.resolve(target)
+        self._resolved_target = resolved
+        return resolved
 
     # -- Flux/depth computation --
 
