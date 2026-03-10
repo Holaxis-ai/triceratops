@@ -6,6 +6,7 @@ Fixes BUG-07: raises TRILEGALQueryError on failure instead of returning 0.0.
 
 from __future__ import annotations
 
+import time
 from pathlib import Path
 from time import sleep
 
@@ -63,20 +64,51 @@ def _submit_trilegal_form(ra_deg: float, dec_deg: float) -> str | None:
     return None
 
 
-def _download_and_save(output_url: str, cache_path: Path) -> Path:
+def _poll_until_complete(
+    url: str,
+    timeout_s: float = 600,
+    interval_s: float = 10,
+) -> None:
+    """Poll *url* until TRILEGAL signals normal termination.
+
+    Parameters
+    ----------
+    url:
+        The TRILEGAL output URL to poll.
+    timeout_s:
+        Maximum seconds to wait before raising :class:`TimeoutError`.
+        Default is 600 (10 minutes).
+    interval_s:
+        Seconds to sleep between polls.  Default is 10.
+
+    Raises
+    ------
+    TimeoutError
+        If the query does not complete within *timeout_s* seconds.
+    """
+    deadline = time.monotonic() + timeout_s
+    while time.monotonic() < deadline:
+        last = pd.read_csv(url, header=None).iloc[-1:]
+        if last.values[0, 0] == "#TRILEGAL normally terminated":
+            return
+        time.sleep(interval_s)
+    raise TimeoutError(
+        f"TRILEGAL query did not complete within {timeout_s}s. "
+        f"Check {url} manually."
+    )
+
+
+def _download_and_save(
+    output_url: str,
+    cache_path: Path,
+    poll_timeout_seconds: float = 600,
+    poll_interval_seconds: float = 10,
+) -> Path:
     """Poll the TRILEGAL results URL until complete, then save CSV.
 
     Ports funcs.save_trilegal() (funcs.py:354-380).
     """
-    for _ in range(1000):
-        last = pd.read_csv(output_url, header=None).iloc[-1:]
-        if last.values[0, 0] == "#TRILEGAL normally terminated":
-            break
-        sleep(10)
-    else:
-        raise TRILEGALQueryError(
-            f"TRILEGAL query did not complete after polling: {output_url}"
-        )
+    _poll_until_complete(output_url, timeout_s=poll_timeout_seconds, interval_s=poll_interval_seconds)
 
     df = pd.read_csv(output_url, sep=r"\s+")
     df.to_csv(cache_path, index=False)
@@ -96,14 +128,32 @@ class TRILEGALProvider:
         dec_deg: float,
         target_tmag: float,
         cache_path: Path | None = None,
+        poll_timeout_seconds: float = 600,
+        poll_interval_seconds: float = 10,
     ) -> TRILEGALResult:
         """Submit a TRILEGAL web query and return parsed results.
 
         If cache_path exists, loads from disk without a web request.
         If cache_path is given but does not exist, saves results there.
 
-        Raises:
-            TRILEGALQueryError: On any web or parsing failure.
+        Parameters
+        ----------
+        ra_deg, dec_deg:
+            Sky coordinates of the target field.
+        target_tmag:
+            TESS magnitude of the target star (used for filtering).
+        cache_path:
+            Optional explicit path for the cached CSV.
+        poll_timeout_seconds:
+            Maximum time (seconds) to wait for TRILEGAL to finish.
+            Default: 600 (10 minutes).
+        poll_interval_seconds:
+            Polling cadence in seconds.  Default: 10.
+
+        Raises
+        ------
+        TRILEGALQueryError:
+            On any web or parsing failure (including timeout).
         """
         if cache_path is not None and cache_path.exists():
             return parse_trilegal_csv(cache_path, target_tmag)
@@ -115,10 +165,19 @@ class TRILEGALProvider:
                     f"TRILEGAL service unavailable for ra={ra_deg}, dec={dec_deg}"
                 )
             save_to = cache_path or Path(f"trilegal_{ra_deg:.4f}_{dec_deg:.4f}.csv")
-            _download_and_save(output_url, save_to)
+            _download_and_save(
+                output_url,
+                save_to,
+                poll_timeout_seconds=poll_timeout_seconds,
+                poll_interval_seconds=poll_interval_seconds,
+            )
             return parse_trilegal_csv(save_to, target_tmag)
         except TRILEGALQueryError:
             raise
+        except TimeoutError as exc:
+            raise TRILEGALQueryError(
+                f"TRILEGAL query timed out for ra={ra_deg}, dec={dec_deg}: {exc}"
+            ) from exc
         except Exception as exc:
             raise TRILEGALQueryError(
                 f"TRILEGAL query failed for ra={ra_deg}, dec={dec_deg}: {exc}"
