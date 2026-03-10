@@ -96,6 +96,53 @@ class TestLoadMoluscFile:
         with pytest.raises(ValueError, match=str(csv)):
             load_molusc_file(csv)
 
+    def test_non_numeric_column_raises_with_path(self, tmp_path: Path) -> None:
+        csv = tmp_path / "bad_numeric.csv"
+        csv.write_text(
+            "semi-major axis(AU),eccentricity,mass ratio\n"
+            "foo,0.1,0.4\n"
+        )
+        with pytest.raises(ValueError, match=str(csv)):
+            load_molusc_file(csv)
+
+    def test_nan_in_column_raises(self, tmp_path: Path) -> None:
+        csv = tmp_path / "nan.csv"
+        csv.write_text(
+            "semi-major axis(AU),eccentricity,mass ratio\n"
+            "10.0,NaN,0.4\n"
+        )
+        with pytest.raises(ValueError, match="non-finite"):
+            load_molusc_file(csv)
+
+    def test_inf_in_column_raises(self, tmp_path: Path) -> None:
+        csv = tmp_path / "inf.csv"
+        csv.write_text(
+            "semi-major axis(AU),eccentricity,mass ratio\n"
+            "inf,0.1,0.4\n"
+        )
+        with pytest.raises(ValueError, match="non-finite"):
+            load_molusc_file(csv)
+
+
+class TestMoluscDataDtypeValidation:
+    def test_integer_array_raises(self) -> None:
+        """Integer arrays must be rejected — numpy ints are not floating-point."""
+        with pytest.raises(ValueError, match="floating-point"):
+            MoluscData(
+                semi_major_axis_au=np.array([10, 20], dtype=int),
+                eccentricity=np.array([0.0, 0.1]),
+                mass_ratio=np.array([0.5, 0.6]),
+            )
+
+    def test_object_array_raises(self) -> None:
+        """Object arrays (e.g. strings coerced by np.asarray) must be rejected."""
+        with pytest.raises(ValueError, match="floating-point"):
+            MoluscData(
+                semi_major_axis_au=np.array(["foo", "bar"]),
+                eccentricity=np.array([0.0, 0.1]),
+                mass_ratio=np.array([0.5, 0.6]),
+            )
+
 
 # ---------------------------------------------------------------------------
 # CWD independence with molusc_data

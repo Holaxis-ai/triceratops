@@ -22,8 +22,23 @@ def load_molusc_file(path: Path) -> MoluscData:
     missing = required - set(df.columns)
     if missing:
         raise ValueError(f"MOLUSC file {path} is missing columns: {missing}")
-    return MoluscData(
-        semi_major_axis_au=np.asarray(df["semi-major axis(AU)"]),
-        eccentricity=np.asarray(df["eccentricity"]),
-        mass_ratio=np.asarray(df["mass ratio"]),
-    )
+    arrays = {}
+    for col, key in [
+        ("semi-major axis(AU)", "semi_major_axis_au"),
+        ("eccentricity", "eccentricity"),
+        ("mass ratio", "mass_ratio"),
+    ]:
+        try:
+            arr = np.asarray(df[col], dtype=float)
+        except (ValueError, TypeError) as exc:
+            raise ValueError(
+                f"MOLUSC file {path}: column '{col}' contains non-numeric values. "
+                f"Original error: {exc}"
+            ) from exc
+        if not np.all(np.isfinite(arr)):
+            raise ValueError(
+                f"MOLUSC file {path}: column '{col}' contains non-finite values "
+                f"(NaN or inf)."
+            )
+        arrays[key] = arr
+    return MoluscData(**arrays)

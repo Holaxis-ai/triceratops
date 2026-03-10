@@ -173,7 +173,7 @@ class TestLoadMoluscQs:
 
     def test_truncates_when_longer_than_n(self) -> None:
         """When more rows survive filtering than n, result is truncated to n."""
-        data = self._make_data([(a, 0.0, 0.5) for a in [20, 30, 40, 50, 60]])
+        data = self._make_data([(a, 0.0, 0.5) for a in [20.0, 30.0, 40.0, 50.0, 60.0]])
         result = _load_molusc_qs(data, n=3, primary_mass=1.0)
         assert result.shape == (3,)
 

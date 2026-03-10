@@ -21,6 +21,17 @@ class MoluscData:
     mass_ratio: np.ndarray  # "mass ratio" column
 
     def __post_init__(self) -> None:
+        fields = {
+            "semi_major_axis_au": self.semi_major_axis_au,
+            "eccentricity": self.eccentricity,
+            "mass_ratio": self.mass_ratio,
+        }
+        for name, arr in fields.items():
+            if not np.issubdtype(arr.dtype, np.floating):
+                raise ValueError(
+                    f"MoluscData.{name} must be a floating-point array, "
+                    f"got dtype={arr.dtype!r}."
+                )
         la, le, lm = len(self.semi_major_axis_au), len(self.eccentricity), len(self.mass_ratio)
         if not (la == le == lm):
             raise ValueError(
