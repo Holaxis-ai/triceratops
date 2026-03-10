@@ -266,6 +266,16 @@ class ValidationEngine:
         Returns:
             ValidationResult with FPP, NFPP, and per-scenario results.
         """
+        # Guard: target_id must match the stellar field to prevent misattributed results
+        # from corrupted or mis-assembled payloads in serialized/remote job flows.
+        field_target_id = prepared.stellar_field.target_id
+        if prepared.target_id != field_target_id:
+            raise ValueError(
+                f"PreparedValidationInputs.target_id ({prepared.target_id}) does not match "
+                f"stellar_field.target_id ({field_target_id}). "
+                "Payload may be corrupted or incorrectly assembled."
+            )
+
         return self.compute(
             light_curve=prepared.light_curve,
             stellar_field=prepared.stellar_field,

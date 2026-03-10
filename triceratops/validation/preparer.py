@@ -1,8 +1,10 @@
-"""ValidationPreparer: owns all provider-backed data acquisition and materialisation.
+"""ValidationPreparer: owns provider-backed data acquisition and materialisation.
 
-This module contains the sole place in the system that knows about providers,
-cache paths, and file loading. Its output (PreparedValidationInputs) is the
-clean boundary for provider-free compute.
+This module is the intended home for all provider-backed IO when using the
+two-phase prepare/compute split.  ValidationWorkspace still performs a catalog
+query in its constructor (for compatibility with the interactive local workflow),
+but any code that needs a clean, testable prepare boundary should use this class.
+Its output (PreparedValidationInputs) is the clean boundary for provider-free compute.
 
 Two-phase design
 ----------------
@@ -159,19 +161,26 @@ class ValidationPreparer:
                     "aperture_pixels_per_sector missing — flux ratios not computed."
                 )
 
-        # ---- 3. TRILEGAL population fetch ----
+        # ---- 3. TRILEGAL population fetch (only if needed by active scenarios) ----
         trilegal_population: TRILEGALResult | None = None
         trilegal_cache_origin: str | None = None
         if self._population is not None:
-            cache = Path(trilegal_cache_path) if trilegal_cache_path else None
-            target = stellar_field.target
-            trilegal_population = self._population.query(
-                ra_deg=target.ra_deg,
-                dec_deg=target.dec_deg,
-                target_tmag=target.tmag,
-                cache_path=cache,
+            from triceratops.domain.scenario_id import ScenarioID
+            from triceratops.scenarios.registry import DEFAULT_REGISTRY
+            needs_trilegal = any(
+                s.scenario_id in ScenarioID.trilegal_scenarios()
+                for s in DEFAULT_REGISTRY.all_scenarios()
             )
-            trilegal_cache_origin = trilegal_cache_path
+            if needs_trilegal:
+                cache = Path(trilegal_cache_path) if trilegal_cache_path else None
+                target = stellar_field.target
+                trilegal_population = self._population.query(
+                    ra_deg=target.ra_deg,
+                    dec_deg=target.dec_deg,
+                    target_tmag=target.tmag,
+                    cache_path=cache,
+                )
+                trilegal_cache_origin = trilegal_cache_path
 
         # ---- 4. Contrast curve loading ----
         contrast_curve: ContrastCurve | None = None
@@ -184,6 +193,11 @@ class ValidationPreparer:
         # ---- 5. External light curves loading ----
         external_lcs: list[ExternalLightCurve] | None = None
         if external_lc_files and filt_lcs:
+            if len(external_lc_files) != len(filt_lcs):
+                raise ValueError(
+                    f"external_lc_files and filt_lcs must have the same length, "
+                    f"got {len(external_lc_files)} files and {len(filt_lcs)} filters."
+                )
             from triceratops.io.external_lc import load_external_lc_as_object
             external_lcs = [
                 load_external_lc_as_object(Path(f), b)

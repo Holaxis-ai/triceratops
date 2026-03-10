@@ -348,3 +348,128 @@ class TestComputePrepared:
         # Should not raise
         vr = engine.compute_prepared(pvi)
         assert isinstance(vr, ValidationResult)
+
+
+# ---------------------------------------------------------------------------
+# Review-identified fixes: target_id consistency, zip length guard, eager TRILEGAL
+# ---------------------------------------------------------------------------
+
+
+class TestComputePreparedTargetIdGuard:
+    """compute_prepared must reject payloads where target_id != stellar_field.target_id."""
+
+    def test_matching_ids_accepted(
+        self, stellar_field: StellarField, lc: LightCurve, cfg: Config
+    ) -> None:
+        engine = ValidationEngine(registry=ScenarioRegistry())
+        pvi = PreparedValidationInputs(
+            target_id=stellar_field.target_id,  # matches
+            stellar_field=stellar_field,
+            light_curve=lc,
+            config=cfg,
+            period_days=5.0,
+        )
+        # Should not raise
+        vr = engine.compute_prepared(pvi)
+        assert isinstance(vr, ValidationResult)
+
+    def test_mismatched_ids_raises(
+        self, stellar_field: StellarField, lc: LightCurve, cfg: Config
+    ) -> None:
+        engine = ValidationEngine(registry=ScenarioRegistry())
+        pvi = PreparedValidationInputs(
+            target_id=99999999,  # does NOT match stellar_field.target_id=99887766
+            stellar_field=stellar_field,
+            light_curve=lc,
+            config=cfg,
+            period_days=5.0,
+        )
+        with pytest.raises(ValueError, match="target_id.*does not match"):
+            engine.compute_prepared(pvi)
+
+    def test_error_message_includes_both_ids(
+        self, stellar_field: StellarField, lc: LightCurve, cfg: Config
+    ) -> None:
+        engine = ValidationEngine(registry=ScenarioRegistry())
+        pvi = PreparedValidationInputs(
+            target_id=11111111,
+            stellar_field=stellar_field,
+            light_curve=lc,
+            config=cfg,
+            period_days=5.0,
+        )
+        with pytest.raises(ValueError) as exc_info:
+            engine.compute_prepared(pvi)
+        msg = str(exc_info.value)
+        assert "11111111" in msg
+        assert str(stellar_field.target_id) in msg
+
+
+class TestPreparerExternalLcLengthGuard:
+    """ValidationPreparer.prepare() must reject mismatched external_lc_files / filt_lcs."""
+
+    def _make_preparer(self) -> object:
+        from unittest.mock import MagicMock
+        from triceratops.domain.value_objects import StellarParameters
+        from triceratops.validation.preparer import ValidationPreparer
+
+        star = Star(
+            tic_id=1234,
+            ra_deg=10.0, dec_deg=5.0,
+            tmag=12.0, jmag=11.5, hmag=11.3, kmag=11.2,
+            bmag=12.5, vmag=12.2,
+            stellar_params=StellarParameters(
+                mass_msun=1.0, radius_rsun=1.0, teff_k=5500.0,
+                logg=4.4, metallicity_dex=0.0, parallax_mas=10.0,
+            ),
+            flux_ratio=1.0,
+            transit_depth_required=0.01,
+        )
+        sf = StellarField(target_id=1234, mission="TESS", search_radius_pixels=10, stars=[star])
+        mock_catalog = MagicMock()
+        mock_catalog.query_nearby_stars.return_value = sf
+        return ValidationPreparer(catalog_provider=mock_catalog)
+
+    def test_matching_lengths_accepted(self, lc: LightCurve, cfg: Config, tmp_path) -> None:
+        """Same-length lists should not raise (even if files don't exist for this unit test)."""
+        preparer = self._make_preparer()
+        # We expect an error about missing files, NOT about mismatched lengths
+        with pytest.raises(Exception) as exc_info:
+            preparer.prepare(
+                target_id=1234,
+                sectors=np.array([1]),
+                light_curve=lc,
+                config=cfg,
+                period_days=5.0,
+                external_lc_files=[str(tmp_path / "a.txt"), str(tmp_path / "b.txt")],
+                filt_lcs=["J", "i"],
+            )
+        assert "mismatched" not in str(exc_info.value).lower()
+
+    def test_mismatched_lengths_raises_valueerror(self, lc: LightCurve, cfg: Config) -> None:
+        preparer = self._make_preparer()
+        with pytest.raises(ValueError, match="same length"):
+            preparer.prepare(
+                target_id=1234,
+                sectors=np.array([1]),
+                light_curve=lc,
+                config=cfg,
+                period_days=5.0,
+                external_lc_files=["a.txt", "b.txt", "c.txt"],  # 3 files
+                filt_lcs=["J", "i"],                              # 2 filters
+            )
+
+    def test_error_message_includes_counts(self, lc: LightCurve, cfg: Config) -> None:
+        preparer = self._make_preparer()
+        with pytest.raises(ValueError) as exc_info:
+            preparer.prepare(
+                target_id=1234,
+                sectors=np.array([1]),
+                light_curve=lc,
+                config=cfg,
+                period_days=5.0,
+                external_lc_files=["a.txt"],
+                filt_lcs=["J", "i", "r"],
+            )
+        msg = str(exc_info.value)
+        assert "1" in msg and "3" in msg
