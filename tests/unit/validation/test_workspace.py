@@ -285,3 +285,76 @@ class TestComputeProbs:
         vr = workspace.compute_probs(transit_lc, period_days=5.0)
         assert workspace.results is vr
         assert workspace.fpp == 1.0
+
+
+# ---------------------------------------------------------------------------
+# calc_depths tests (Gap 5)
+# ---------------------------------------------------------------------------
+
+
+class TestCalcDepths:
+    """calc_depths() must update star.flux_ratio and star.transit_depth_required."""
+
+    def test_calc_depths_sets_flux_ratio(self, workspace: ValidationWorkspace) -> None:
+        """After calc_depths(), every star must have a non-None flux_ratio."""
+        n_stars = len(workspace.stars)
+        # One sector: star pixel coords (n_stars, 2), aperture pixels (4, 2)
+        pixel_coords = [np.array([[5.0, 5.0], [6.0, 5.0]])]  # target + 1 neighbour
+        aperture_pixels = [np.array([[5, 5], [5, 6], [6, 5], [6, 6]], dtype=float)]
+
+        workspace.calc_depths(
+            transit_depth=0.01,
+            pixel_coords_per_sector=pixel_coords,
+            aperture_pixels_per_sector=aperture_pixels,
+        )
+
+        for star in workspace.stars:
+            assert star.flux_ratio is not None
+            assert 0.0 <= star.flux_ratio <= 1.0
+
+    def test_calc_depths_sets_transit_depth(self, workspace: ValidationWorkspace) -> None:
+        """After calc_depths(), every star must have a non-None transit_depth_required."""
+        pixel_coords = [np.array([[5.0, 5.0], [6.0, 5.0]])]
+        aperture_pixels = [np.array([[5, 5], [5, 6], [6, 5], [6, 6]], dtype=float)]
+
+        workspace.calc_depths(
+            transit_depth=0.01,
+            pixel_coords_per_sector=pixel_coords,
+            aperture_pixels_per_sector=aperture_pixels,
+        )
+
+        for star in workspace.stars:
+            assert star.transit_depth_required is not None
+
+    def test_calc_depths_invalidates_result(self, workspace: ValidationWorkspace) -> None:
+        """calc_depths() must invalidate any cached result."""
+        workspace._last_result = ValidationResult(
+            target_id=0, false_positive_probability=0.5,
+            nearby_false_positive_probability=0.0, scenario_results=[],
+        )
+        pixel_coords = [np.array([[5.0, 5.0], [6.0, 5.0]])]
+        aperture_pixels = [np.array([[5, 5], [5, 6], [6, 5], [6, 6]], dtype=float)]
+
+        workspace.calc_depths(
+            transit_depth=0.01,
+            pixel_coords_per_sector=pixel_coords,
+            aperture_pixels_per_sector=aperture_pixels,
+        )
+
+        assert workspace._last_result is None
+
+
+# ---------------------------------------------------------------------------
+# plot_fits RuntimeError guard (Gap 5)
+# ---------------------------------------------------------------------------
+
+
+class TestPlotFitsGuard:
+    """plot_fits() must raise RuntimeError if compute_probs() was not called."""
+
+    def test_plot_fits_before_compute_raises(
+        self, workspace: ValidationWorkspace,
+    ) -> None:
+        """plot_fits() raises RuntimeError when _last_result is None."""
+        with pytest.raises(RuntimeError, match="compute_probs"):
+            workspace.plot_fits()
