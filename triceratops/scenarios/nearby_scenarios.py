@@ -277,6 +277,104 @@ class NTPUnknownScenario(BaseScenario):
         )
 
 
+def _eval_eb_lnL(
+    light_curve: LightCurve,
+    lnsigma: float,
+    samples: dict,
+    geometry: dict,
+    rss: np.ndarray,
+    u1s: np.ndarray,
+    u2s: np.ndarray,
+    force_serial: bool,
+    *,
+    extra_mask: np.ndarray | None = None,
+) -> tuple[np.ndarray, np.ndarray]:
+    """Shared EB log-likelihood evaluator for nearby (NEB) scenarios.
+
+    Evaluates lnL for the standard EB branch (q < EB_Q_TWIN_THRESHOLD) and
+    the twin EB branch (q >= EB_Q_TWIN_THRESHOLD), returning both arrays.
+    Draws excluded by mask conditions remain at -inf (initial value).
+
+    Args:
+        light_curve: Observed light curve with time/flux/sigma/cadence.
+        lnsigma: Log noise scale.
+        samples: Prior samples dict; must contain keys
+            ``qs``, ``incs``, ``eccs``, ``argps``, ``P_orb``,
+            ``radii``, ``fluxratios``.
+        geometry: Orbital geometry dict; must contain keys
+            ``Ptra``, ``coll``, ``a`` (standard branch) and
+            ``Ptra_twin``, ``coll_twin``, ``a_twin`` (twin branch).
+        rss: Host-star radii per sample, shape (N,).
+        u1s: Limb-darkening u1 per sample, shape (N,).
+        u2s: Limb-darkening u2 per sample, shape (N,).
+        force_serial: If True, disable parallel evaluation.
+        extra_mask: Optional boolean mask applied to both branches before
+            the q-branching split (e.g. main-sequence filter). Shape (N,).
+
+    Returns:
+        (lnL, lnL_twin): Log-likelihood arrays of shape (N,).  Entries for
+        draws excluded by the masks remain at ``-inf``.
+    """
+    N = len(rss)
+    companion_fr = np.zeros(N)
+
+    lnL = np.full(N, -np.inf)
+    lnL_twin = np.full(N, -np.inf)
+
+    mask, mask_twin = build_eb_branch_masks(
+        samples["qs"], samples["incs"],
+        geometry["Ptra"], geometry["coll"],
+        geometry["Ptra_twin"], geometry["coll_twin"],
+        extra_mask=extra_mask,
+    )
+
+    chi2_half = lnL_eb_p(
+        time=light_curve.time_days,
+        flux=light_curve.flux,
+        sigma=light_curve.sigma,
+        rss=rss,
+        rcomps=samples["radii"],
+        eb_flux_ratios=samples["fluxratios"],
+        periods=samples["P_orb"],
+        incs=samples["incs"],
+        as_=geometry["a"],
+        u1s=u1s,
+        u2s=u2s,
+        eccs=samples["eccs"],
+        argps=samples["argps"],
+        companion_flux_ratios=companion_fr,
+        mask=mask,
+        exptime=light_curve.cadence_days,
+        nsamples=light_curve.supersampling_rate,
+        force_serial=force_serial,
+    )
+    lnL = -0.5 * _ln2pi - lnsigma - chi2_half
+
+    chi2_half_twin = lnL_eb_twin_p(
+        time=light_curve.time_days,
+        flux=light_curve.flux,
+        sigma=light_curve.sigma,
+        rss=rss,
+        rcomps=samples["radii"],
+        eb_flux_ratios=samples["fluxratios"],
+        periods=2 * samples["P_orb"],
+        incs=samples["incs"],
+        as_=geometry["a_twin"],
+        u1s=u1s,
+        u2s=u2s,
+        eccs=samples["eccs"],
+        argps=samples["argps"],
+        companion_flux_ratios=companion_fr,
+        mask=mask_twin,
+        exptime=light_curve.cadence_days,
+        nsamples=light_curve.supersampling_rate,
+        force_serial=force_serial,
+    )
+    lnL_twin = -0.5 * _ln2pi - lnsigma - chi2_half_twin
+
+    return lnL, lnL_twin
+
+
 class NEBUnknownScenario(BaseScenario):
     """Eclipsing Binary on a Nearby star of Unknown identity.
 
