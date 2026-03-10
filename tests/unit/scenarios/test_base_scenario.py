@@ -262,3 +262,140 @@ class TestBaseScenarioABC:
         result = scenario.compute(light_curve, stellar_params, 5.0, cfg)
         assert isinstance(result, ScenarioResult)
         assert len(result.host_mass_msun) == 5
+
+
+# ---------------------------------------------------------------------------
+# _stellar_logg_from_mass_radius
+# ---------------------------------------------------------------------------
+
+class TestStellarLoggFromMassRadius:
+    """Tests for BaseScenario._stellar_logg_from_mass_radius()."""
+
+    _logg_fn = staticmethod(BaseScenario._stellar_logg_from_mass_radius)
+
+    def _make_params(self, mass_msun: float, radius_rsun: float) -> StellarParameters:
+        return StellarParameters(
+            mass_msun=mass_msun, radius_rsun=radius_rsun,
+            teff_k=5778.0, logg=4.44, metallicity_dex=0.0, parallax_mas=10.0,
+        )
+
+    def test_solar_logg_approx_4_44(self) -> None:
+        """M=1 Msun, R=1 Rsun should yield logg ≈ 4.44 (accepted solar value)."""
+        from triceratops.config.config import CONST
+        import math
+        params = self._make_params(1.0, 1.0)
+        result = self._logg_fn(params)
+        expected = math.log10(CONST.G * CONST.Msun / CONST.Rsun ** 2)
+        assert result == pytest.approx(expected, abs=1e-4)
+        # And should be in the physically sensible neighbourhood of 4.44
+        assert 4.40 <= result <= 4.48
+
+    def test_small_radius_gives_larger_logg(self) -> None:
+        """Smaller radius → higher surface gravity → larger logg."""
+        params_small = self._make_params(1.0, 0.1)
+        params_large = self._make_params(1.0, 1.0)
+        assert self._logg_fn(params_small) > self._logg_fn(params_large)
+
+    def test_large_radius_gives_smaller_logg(self) -> None:
+        """Larger radius → lower surface gravity → smaller logg."""
+        params_ref = self._make_params(1.0, 1.0)
+        params_giant = self._make_params(1.0, 10.0)
+        assert self._logg_fn(params_giant) < self._logg_fn(params_ref)
+
+    def test_logg_formula_matches_manual_calculation(self) -> None:
+        """Verify against log10(G * M * Msun / (R * Rsun)^2) using CONST values."""
+        from triceratops.config.config import CONST
+        import math
+        mass, radius = 1.5, 2.0
+        params = self._make_params(mass, radius)
+        expected = math.log10(
+            CONST.G * (mass * CONST.Msun) / (radius * CONST.Rsun) ** 2
+        )
+        result = self._logg_fn(params)
+        assert result == pytest.approx(expected, rel=1e-10)
+
+    def test_high_mass_increases_logg(self) -> None:
+        """Higher mass at same radius → higher logg."""
+        params_lo = self._make_params(0.5, 1.0)
+        params_hi = self._make_params(2.0, 1.0)
+        assert self._logg_fn(params_hi) > self._logg_fn(params_lo)
+
+    def test_returns_float(self) -> None:
+        params = self._make_params(1.0, 1.0)
+        result = self._logg_fn(params)
+        assert isinstance(result, float)
+
+
+# ---------------------------------------------------------------------------
+# _resolve_external_lc_ldcs edge cases
+# ---------------------------------------------------------------------------
+
+class TestResolveExternalLcLdcs:
+    """Tests for BaseScenario._resolve_external_lc_ldcs()."""
+
+    @pytest.fixture()
+    def stellar_params(self):
+        return StellarParameters(
+            mass_msun=1.0, radius_rsun=1.0, teff_k=5778.0,
+            logg=4.44, metallicity_dex=0.0, parallax_mas=10.0,
+        )
+
+    def _make_ext_lc(self, band: str = "J") -> ExternalLightCurve:
+        lc = LightCurve(
+            time_days=np.linspace(-0.1, 0.1, 20),
+            flux=np.ones(20),
+            flux_err=0.002,
+        )
+        return ExternalLightCurve(light_curve=lc, band=band)
+
+    def test_empty_list_returns_empty_list(self, stellar_params) -> None:
+        scenario = _MinimalTPScenario(FixedLDCCatalog())
+        result = scenario._resolve_external_lc_ldcs([], stellar_params)
+        assert result == []
+
+    def test_single_lc_returns_list_of_length_one(self, stellar_params) -> None:
+        scenario = _MinimalTPScenario(FixedLDCCatalog(u1=0.3, u2=0.1))
+        ext_lcs = [self._make_ext_lc("J")]
+        result = scenario._resolve_external_lc_ldcs(ext_lcs, stellar_params)
+        assert len(result) == 1
+
+    def test_single_lc_has_populated_ldc(self, stellar_params) -> None:
+        u1, u2 = 0.35, 0.15
+        scenario = _MinimalTPScenario(FixedLDCCatalog(u1=u1, u2=u2))
+        ext_lcs = [self._make_ext_lc("J")]
+        result = scenario._resolve_external_lc_ldcs(ext_lcs, stellar_params)
+        assert result[0].ldc is not None
+        assert result[0].ldc.u1 == pytest.approx(u1)
+        assert result[0].ldc.u2 == pytest.approx(u2)
+
+    def test_band_is_preserved(self, stellar_params) -> None:
+        scenario = _MinimalTPScenario(FixedLDCCatalog())
+        ext_lcs = [self._make_ext_lc("K")]
+        result = scenario._resolve_external_lc_ldcs(ext_lcs, stellar_params)
+        assert result[0].band == "K"
+
+    def test_multiple_lcs_all_get_ldc(self, stellar_params) -> None:
+        scenario = _MinimalTPScenario(FixedLDCCatalog(u1=0.4, u2=0.2))
+        ext_lcs = [self._make_ext_lc("J"), self._make_ext_lc("H"), self._make_ext_lc("K")]
+        result = scenario._resolve_external_lc_ldcs(ext_lcs, stellar_params)
+        assert len(result) == 3
+        for ext in result:
+            assert ext.ldc is not None
+
+    def test_light_curve_data_preserved(self, stellar_params) -> None:
+        """Resolved ExternalLightCurve retains the original flux data."""
+        scenario = _MinimalTPScenario(FixedLDCCatalog())
+        ext = self._make_ext_lc("J")
+        result = scenario._resolve_external_lc_ldcs([ext], stellar_params)
+        np.testing.assert_array_equal(
+            result[0].light_curve.flux, ext.light_curve.flux
+        )
+
+    def test_ldc_band_matches_filter(self, stellar_params) -> None:
+        """The LDC stored on the resolved LC carries the correct band string."""
+        scenario = _MinimalTPScenario(FixedLDCCatalog())
+        ext = self._make_ext_lc("H")
+        result = scenario._resolve_external_lc_ldcs([ext], stellar_params)
+        # FixedLDCCatalog.get_coefficients sets band=filter_name
+        assert result[0].ldc is not None
+        assert result[0].ldc.band == "H"
