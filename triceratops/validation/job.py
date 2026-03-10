@@ -93,6 +93,108 @@ class PreparedValidationInputs:
     molusc_file: str | None = None  # local path — not yet materialised; deferred to Phase 4
     scenario_ids: Sequence[ScenarioID] | None = None  # None → run full default registry
 
+    def validate(self) -> None:
+        """Preflight validation: assert all scientific preconditions are met.
+
+        Called by ``ValidationEngine.compute_prepared()`` before any
+        scenario work begins.  May also be called explicitly to validate
+        a directly-constructed or deserialized payload.
+
+        Raises:
+            ValueError: If structural field invariants are broken
+                (delegated to ``StellarField.validate()``).
+            PreparedInputIncompleteError: If a required field is missing
+                (no stellar_params, missing TRILEGAL population).
+            ValidationInputError: If a scientific input value is invalid
+                (empty or inconsistent LightCurve, non-positive period).
+        """
+        import math
+
+        from triceratops.validation.errors import (
+            PreparedInputIncompleteError,
+            ValidationInputError,
+        )
+
+        # 1. Field structure (target at index 0, no duplicates, etc.)
+        self.stellar_field.validate()
+
+        # 2. Target must have stellar parameters
+        if self.stellar_field.target.stellar_params is None:
+            raise PreparedInputIncompleteError(
+                f"Target star (TIC {self.target_id}) has no stellar_params. "
+                "Stellar parameters are required for all scenario computations. "
+                "Check the catalog query result or set stellar_params manually."
+            )
+
+        # 3. LightCurve must be non-empty and shape-consistent
+        n_time = len(self.light_curve.time_days)
+        n_flux = len(self.light_curve.flux)
+        if n_time == 0:
+            raise ValidationInputError("light_curve.time_days is empty.")
+        if n_flux == 0:
+            raise ValidationInputError("light_curve.flux is empty.")
+        if n_time != n_flux:
+            raise ValidationInputError(
+                f"light_curve shape mismatch: time_days has {n_time} points "
+                f"but flux has {n_flux} points."
+            )
+
+        # 4. period_days must be positive and finite
+        period = self.period_days
+        if isinstance(period, list):
+            if len(period) != 2:
+                raise ValidationInputError(
+                    f"period_days as a range must have exactly 2 elements [min, max], "
+                    f"got {period!r}."
+                )
+            lo, hi = float(period[0]), float(period[1])
+            if not (math.isfinite(lo) and math.isfinite(hi)):
+                raise ValidationInputError(
+                    f"period_days range contains non-finite values: {period!r}."
+                )
+            if lo <= 0 or hi <= 0:
+                raise ValidationInputError(
+                    f"period_days range must be positive, got {period!r}."
+                )
+            if lo >= hi:
+                raise ValidationInputError(
+                    f"period_days range must satisfy min < max, got {period!r}."
+                )
+        else:
+            p = float(period)
+            if not math.isfinite(p):
+                raise ValidationInputError(
+                    f"period_days must be finite, got {period!r}."
+                )
+            if p <= 0:
+                raise ValidationInputError(
+                    f"period_days must be positive, got {period!r}."
+                )
+
+        # 5. TRILEGAL population must be present for explicitly-requested TRILEGAL scenarios.
+        #
+        # Only checked when scenario_ids is explicitly set.  When scenario_ids=None
+        # the engine uses its own (possibly custom) registry, which validate() cannot
+        # access; the workspace/preparer already materialises the population before
+        # calling compute_prepared(), so the check there would be redundant and would
+        # incorrectly fire for tests that use a custom registry without TRILEGAL scenarios.
+        if self.scenario_ids is not None and self.trilegal_population is None:
+            from triceratops.domain.scenario_id import ScenarioID
+            from triceratops.scenarios.registry import DEFAULT_REGISTRY
+            trilegal_ids = set(ScenarioID.trilegal_scenarios())
+            active_scenarios = [
+                s for sid in self.scenario_ids
+                if (s := DEFAULT_REGISTRY.get_or_none(sid)) is not None
+            ]
+            missing = [s.scenario_id for s in active_scenarios
+                       if s.scenario_id in trilegal_ids]
+            if missing:
+                raise PreparedInputIncompleteError(
+                    f"trilegal_population is required for scenarios {missing} but was not provided. "
+                    "Pass a population_provider to ValidationPreparer or ValidationWorkspace, "
+                    "or exclude TRILEGAL-dependent scenarios via scenario_ids."
+                )
+
 
 @dataclass
 class PreparedValidationMetadata:

@@ -191,7 +191,12 @@ class ValidationEngine:
 
         stellar_params = stellar_field.target.stellar_params
         if stellar_params is None:
-            return self._aggregate([], stellar_field.target_id)
+            from triceratops.validation.errors import PreparedInputIncompleteError
+            raise PreparedInputIncompleteError(
+                f"Target star (TIC {stellar_field.target_id}) has no stellar_params. "
+                "Stellar parameters are required for all scenario computations. "
+                "Check the catalog query result or set stellar_params manually."
+            )
 
         filt = contrast_curve.band if contrast_curve is not None else None
         shared_kwargs: dict = {
@@ -266,10 +271,11 @@ class ValidationEngine:
         Returns:
             ValidationResult with FPP, NFPP, and per-scenario results.
         """
-        # Guard: structural field invariants (empty stars, wrong target at index 0,
-        # duplicate TIC IDs).  Catches corrupted or directly-constructed payloads
+        # Preflight: structural field invariants + scientific preconditions
+        # (stellar_params, light curve shape, period_days, TRILEGAL presence).
+        # Raises PreparedInputIncompleteError / ValidationInputError / ValueError
         # before any compute work begins.
-        prepared.stellar_field.validate()
+        prepared.validate()
 
         # Guard: target_id must match the stellar field to prevent misattributed results
         # from corrupted or mis-assembled payloads in serialized/remote job flows.
