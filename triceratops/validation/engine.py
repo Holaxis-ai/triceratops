@@ -26,6 +26,7 @@ from triceratops.domain.value_objects import ContrastCurve, StellarParameters
 from triceratops.population.protocols import TRILEGALResult
 from triceratops.scenarios.base import Scenario
 from triceratops.scenarios.registry import DEFAULT_REGISTRY, ScenarioRegistry
+from triceratops.validation.job import PreparedValidationInputs
 
 
 @dataclass
@@ -129,6 +130,7 @@ class ValidationEngine:
         contrast_curve: ContrastCurve | None = None,
         trilegal_cache_path: str | None = None,
         molusc_file: str | None = None,
+        trilegal_population: TRILEGALResult | None = None,
     ) -> ValidationResult:
         """Run all requested scenarios and aggregate into a ValidationResult.
 
@@ -142,7 +144,14 @@ class ValidationEngine:
                 scenarios when no non-target star has positive transit depth.
             external_lcs: Ground-based follow-up light curves.
             contrast_curve: AO/speckle contrast curve for companion prior.
-            trilegal_cache_path: Path to cached TRILEGAL CSV.
+            trilegal_cache_path: Path to cached TRILEGAL CSV.  Used only if
+                ``trilegal_population`` is not already provided.  Deprecated:
+                callers should materialise the population via ValidationPreparer
+                or ValidationWorkspace and pass it directly.
+            trilegal_population: Pre-materialised TRILEGAL population.  When
+                provided, ``trilegal_cache_path`` and any injected
+                ``population_provider`` are ignored for this call.  This is the
+                preferred path for compute_prepared() and remote workers.
 
         Returns:
             ValidationResult with FPP, NFPP, and per-scenario results.
@@ -162,22 +171,23 @@ class ValidationEngine:
         else:
             scenarios_to_run = [self._registry.get(sid) for sid in scenario_ids]
 
-        # Fetch TRILEGAL population once if any scenario needs it
-        trilegal_population = None
-        needs_trilegal = any(
-            s.scenario_id in ScenarioID.trilegal_scenarios()
-            for s in scenarios_to_run
-        )
-        if needs_trilegal and self._population is not None:
-            target = stellar_field.target
-            from pathlib import Path
-            cache = Path(trilegal_cache_path) if trilegal_cache_path else None
-            trilegal_population = self._population.query(  # type: ignore[union-attr]
-                ra_deg=target.ra_deg,
-                dec_deg=target.dec_deg,
-                target_tmag=target.tmag,
-                cache_path=cache,
+        # Use pre-materialised population if given; otherwise lazy-fetch via provider.
+        # The pre-materialised path is preferred: it keeps the engine provider-free.
+        if trilegal_population is None:
+            needs_trilegal = any(
+                s.scenario_id in ScenarioID.trilegal_scenarios()
+                for s in scenarios_to_run
             )
+            if needs_trilegal and self._population is not None:
+                target = stellar_field.target
+                from pathlib import Path
+                cache = Path(trilegal_cache_path) if trilegal_cache_path else None
+                trilegal_population = self._population.query(  # type: ignore[union-attr]
+                    ra_deg=target.ra_deg,
+                    dec_deg=target.dec_deg,
+                    target_tmag=target.tmag,
+                    cache_path=cache,
+                )
 
         host_magnitudes = self._extract_host_magnitudes(stellar_field.target)
         target_flux_ratio = stellar_field.target.flux_ratio
@@ -243,6 +253,36 @@ class ValidationEngine:
                         all_results.append(result_or_tuple)
 
         return self._aggregate(all_results, stellar_field.target_id)
+
+    def compute_prepared(self, prepared: PreparedValidationInputs) -> ValidationResult:
+        """Provider-free compute entrypoint.
+
+        Accepts a fully-materialised PreparedValidationInputs and delegates to the
+        existing compute() logic.  No providers are called; all required data must
+        already be present in the prepared payload.
+
+        This is the correct entrypoint for remote execution (e.g. Modal workers)
+        where no provider access is available.
+
+        Args:
+            prepared: Fully-materialised validation inputs.  Must have
+                trilegal_population already populated if any trilegal-dependent
+                scenarios are being run.
+
+        Returns:
+            ValidationResult with FPP, NFPP, and per-scenario results.
+        """
+        return self.compute(
+            light_curve=prepared.light_curve,
+            stellar_field=prepared.stellar_field,
+            period_days=prepared.period_days,
+            config=prepared.config,
+            scenario_ids=None,
+            external_lcs=prepared.external_lcs,
+            contrast_curve=prepared.contrast_curve,
+            trilegal_population=prepared.trilegal_population,
+            molusc_file=prepared.molusc_file,
+        )
 
     @staticmethod
     def _extract_host_magnitudes(target_star: Star) -> dict[str, float | None]:
