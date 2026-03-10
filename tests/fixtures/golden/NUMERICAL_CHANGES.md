@@ -212,7 +212,7 @@ at the commit that applies this fix.
 
 ## NC-04 — BEBScenario: coll_twin → coll for q < 0.95 collision mask
 
-**Commit:** (pending)
+**Commit:** `ebcca028`
 **Date:** 2026-03-09
 **Status:** Applied
 **Affects FPP:** Yes in principle (BEB/BEBx2P lnZ decreases), but the
