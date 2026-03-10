@@ -632,6 +632,92 @@ class TestPreparerTrilegalScenarioGate:
         mock_pop.query.assert_called_once()
 
 
+class TestPreparerScenarioIdsValidation:
+    """prepare() must reject unregistered ScenarioIDs early with a clear error.
+
+    Previously, unregistered IDs (e.g. EBX2P, which exists in the ScenarioID
+    enum but is not in DEFAULT_REGISTRY) were silently skipped during TRILEGAL
+    gating via get_or_none(), but would crash with KeyError inside compute().
+    The fix: validate all IDs before any IO and raise ValueError with the
+    unknown IDs named.
+    """
+
+    def _make_preparer(self) -> object:
+        from unittest.mock import MagicMock
+        from triceratops.domain.value_objects import StellarParameters
+        from triceratops.validation.preparer import ValidationPreparer
+
+        star = Star(
+            tic_id=5555,
+            ra_deg=0.0, dec_deg=0.0,
+            tmag=10.0, jmag=9.5, hmag=9.3, kmag=9.2,
+            bmag=10.5, vmag=10.2,
+            stellar_params=StellarParameters(
+                mass_msun=1.0, radius_rsun=1.0, teff_k=5500.0,
+                logg=4.4, metallicity_dex=0.0, parallax_mas=10.0,
+            ),
+            flux_ratio=1.0,
+            transit_depth_required=0.01,
+        )
+        sf = StellarField(target_id=5555, mission="TESS", search_radius_pixels=10, stars=[star])
+        mock_catalog = MagicMock()
+        mock_catalog.query_nearby_stars.return_value = sf
+        return ValidationPreparer(catalog_provider=mock_catalog)
+
+    def test_unregistered_id_raises_before_any_io(self, lc: LightCurve, cfg: Config) -> None:
+        """EBX2P exists in ScenarioID enum but is not in DEFAULT_REGISTRY — must raise ValueError."""
+        import numpy as np
+        from triceratops.domain.scenario_id import ScenarioID
+
+        preparer = self._make_preparer()
+        with pytest.raises(ValueError, match="not registered in DEFAULT_REGISTRY"):
+            preparer.prepare(
+                target_id=5555,
+                sectors=np.array([1]),
+                light_curve=lc,
+                config=cfg,
+                period_days=5.0,
+                scenario_ids=[ScenarioID.EBX2P],
+            )
+
+    def test_error_message_names_unknown_ids(self, lc: LightCurve, cfg: Config) -> None:
+        import numpy as np
+        from triceratops.domain.scenario_id import ScenarioID
+
+        preparer = self._make_preparer()
+        with pytest.raises(ValueError) as exc_info:
+            preparer.prepare(
+                target_id=5555,
+                sectors=np.array([1]),
+                light_curve=lc,
+                config=cfg,
+                period_days=5.0,
+                scenario_ids=[ScenarioID.EBX2P, ScenarioID.DEBX2P],
+            )
+        msg = str(exc_info.value)
+        assert "EBX2P" in msg or "EBx2P" in msg
+
+    def test_registered_ids_are_accepted(self, lc: LightCurve, cfg: Config) -> None:
+        """All IDs from DEFAULT_REGISTRY must pass validation without raising."""
+        import numpy as np
+        from triceratops.scenarios.registry import DEFAULT_REGISTRY
+
+        preparer = self._make_preparer()
+        registered_ids = list(DEFAULT_REGISTRY)
+        # No ValueError — any exception here is from missing files/providers, not validation
+        try:
+            preparer.prepare(
+                target_id=5555,
+                sectors=np.array([1]),
+                light_curve=lc,
+                config=cfg,
+                period_days=5.0,
+                scenario_ids=registered_ids,
+            )
+        except ValueError as e:
+            assert "not registered" not in str(e), f"Unexpected validation error: {e}"
+
+
 class TestPrepareComputeScenarioContract:
     """scenario_ids must flow from prepare() through the payload into compute_prepared().
 

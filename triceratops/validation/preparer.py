@@ -137,6 +137,19 @@ class ValidationPreparer:
 
         warnings: list[str] = []
 
+        # ---- 0. Validate scenario_ids against the registry ----
+        # Do this before any IO so callers get a clear error for unregistered IDs.
+        # Unregistered IDs are silently tolerated by nothing downstream — they would
+        # crash with KeyError inside compute().  Fail here instead with the ID named.
+        if scenario_ids is not None:
+            from triceratops.scenarios.registry import DEFAULT_REGISTRY as _reg
+            unknown = [sid for sid in scenario_ids if _reg.get_or_none(sid) is None]
+            if unknown:
+                raise ValueError(
+                    f"scenario_ids contains IDs not registered in DEFAULT_REGISTRY: {unknown}. "
+                    "Remove them or register the corresponding scenario before calling prepare()."
+                )
+
         # ---- 1. Catalog query ----
         stellar_field: StellarField = self._catalog.query_nearby_stars(
             tic_id=target_id,
@@ -173,11 +186,10 @@ class ValidationPreparer:
         if self._population is not None:
             from triceratops.domain.scenario_id import ScenarioID
             from triceratops.scenarios.registry import DEFAULT_REGISTRY
+
+            # scenario_ids already validated in step 0; all IDs are registered.
             if scenario_ids is not None:
-                eligible = [
-                    s for sid in scenario_ids
-                    if (s := DEFAULT_REGISTRY.get_or_none(sid)) is not None
-                ]
+                eligible = [DEFAULT_REGISTRY.get(sid) for sid in scenario_ids]
             else:
                 eligible = DEFAULT_REGISTRY.all_scenarios()
             needs_trilegal = any(
