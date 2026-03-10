@@ -116,6 +116,133 @@ class TestCompanionMassRatio:
 
 
 @pytest.mark.unit
+class TestPlanetRadiusRegimes:
+    def test_flat_prior_range(self) -> None:
+        u = np.random.default_rng(0).random(10000)
+        r = sample_planet_radius(u, host_mass=0.1, flat=True)
+        assert np.all(r >= 0.5)
+        assert np.all(r <= 20.0)
+
+    def test_flat_prior_mean_midpoint(self) -> None:
+        u = np.random.default_rng(0).random(100000)
+        r = sample_planet_radius(u, host_mass=1.0, flat=True)
+        np.testing.assert_allclose(r.mean(), 10.25, atol=0.1)
+
+    def test_low_mass_host_range(self) -> None:
+        # M_s=0.3 is below the 0.45 threshold
+        u = np.random.default_rng(1).random(10000)
+        r = sample_planet_radius(u, host_mass=0.3, flat=False)
+        assert np.all(r >= 0.5)
+        assert np.all(r <= 20.0)
+
+    def test_high_mass_host_range(self) -> None:
+        # M_s=0.8 is above the 0.45 threshold
+        u = np.random.default_rng(1).random(10000)
+        r = sample_planet_radius(u, host_mass=0.8, flat=False)
+        assert np.all(r >= 0.5)
+        assert np.all(r <= 20.0)
+
+    def test_regime_stitching_distributions_differ(self) -> None:
+        # M_s=0.44 uses the M<=0.45 power-law (steeper p5=-7),
+        # M_s=0.46 uses M>0.45 power-law (shallower p2=-4).
+        # The two should produce measurably different distributions.
+        u = np.random.default_rng(2).random(10000)
+        r44 = sample_planet_radius(u.copy(), host_mass=0.44, flat=False)
+        r46 = sample_planet_radius(u.copy(), host_mass=0.46, flat=False)
+        # The steeper slope for M<=0.45 concentrates more weight at small radii
+        assert r44.mean() < r46.mean()
+
+    def test_low_mass_host_uses_steeper_slope(self) -> None:
+        # The M<=0.45 branch has p5=-7 vs p2=-4, giving smaller mean radius
+        u = np.random.default_rng(3).random(50000)
+        r_low = sample_planet_radius(u.copy(), host_mass=0.3, flat=False)
+        r_high = sample_planet_radius(u.copy(), host_mass=0.8, flat=False)
+        assert r_low.mean() < r_high.mean()
+
+
+@pytest.mark.unit
+class TestMassRatioExtended:
+    def test_very_low_mass_returns_all_ones(self) -> None:
+        u = np.random.default_rng(0).random(200)
+        q = sample_mass_ratio(u, primary_mass=0.05)
+        np.testing.assert_array_equal(q, 1.0)
+
+    def test_low_mass_q_min_respected(self) -> None:
+        # M_s=0.2 => q_min = 0.1/0.2 = 0.5
+        u = np.random.default_rng(1).random(10000)
+        q = sample_mass_ratio(u, primary_mass=0.2)
+        assert np.all(q >= 0.5)
+        assert np.all(q <= 1.0)
+
+    def test_mid_mass_range(self) -> None:
+        # M_s=0.5 => q_min = 0.1/0.5 = 0.2
+        u = np.random.default_rng(2).random(10000)
+        q = sample_mass_ratio(u, primary_mass=0.5)
+        assert np.all(q >= 0.2)
+        assert np.all(q <= 1.0)
+
+    def test_high_mass_range(self) -> None:
+        # M_s=1.5 >= 1.0 => q_min = 0.1
+        u = np.random.default_rng(3).random(10000)
+        q = sample_mass_ratio(u, primary_mass=1.5)
+        assert np.all(q >= 0.1)
+        assert np.all(q <= 1.0)
+
+    def test_eb_vs_companion_different_distributions(self) -> None:
+        # sample_mass_ratio (EB) uses p2=-0.5, F_twin=0.30
+        # sample_companion_mass_ratio uses p2=-0.95, F_twin=0.05
+        # Same u should yield different q values
+        u = np.random.default_rng(4).random(10000)
+        q_eb = sample_mass_ratio(u.copy(), primary_mass=1.0)
+        q_comp = sample_companion_mass_ratio(u.copy(), primary_mass=1.0)
+        assert not np.allclose(q_eb, q_comp)
+        # EB has higher twin peak => higher mean
+        assert q_eb.mean() > q_comp.mean()
+
+    def test_twin_fraction_approximate(self) -> None:
+        # F_twin=0.30 in the EB prior results in elevated density at q>=0.95.
+        # With N=100k the fraction of draws >= 0.95 is empirically ~27%.
+        u = np.random.default_rng(42).random(100000)
+        q = sample_mass_ratio(u, primary_mass=1.5)
+        frac = np.mean(q >= 0.95)
+        # Generous bounds: 20% to 35%
+        assert 0.20 <= frac <= 0.35, f"Twin fraction {frac:.3f} outside expected range"
+
+
+@pytest.mark.unit
+class TestInclinationCustomBounds:
+    def test_custom_lower_bound_u0(self) -> None:
+        lower, upper = 20.0, 70.0
+        result = sample_inclination(np.array([0.0]), lower=lower, upper=upper)
+        np.testing.assert_allclose(result, lower, atol=1e-10)
+
+    def test_custom_upper_bound_u1(self) -> None:
+        lower, upper = 20.0, 70.0
+        result = sample_inclination(np.array([1.0]), lower=lower, upper=upper)
+        np.testing.assert_allclose(result, upper, atol=1e-10)
+
+    def test_custom_bounds_output_in_range(self) -> None:
+        lower, upper = 30.0, 60.0
+        u = np.random.default_rng(7).random(1000)
+        result = sample_inclination(u, lower=lower, upper=upper)
+        assert np.all(result >= lower)
+        assert np.all(result <= upper)
+
+    def test_formula_arccos_roundtrip(self) -> None:
+        # The inverse CDF formula: inc = arccos(cos(lower) - u/Norm)
+        # At u=0, inc should equal lower; at u=1, inc should equal upper.
+        lower_rad = np.deg2rad(15.0)
+        upper_rad = np.deg2rad(80.0)
+        Norm = 1.0 / (np.cos(lower_rad) - np.cos(upper_rad))
+        # u=0 => arccos(cos(lower_rad)) = lower_rad
+        inc_lower = np.arccos(np.cos(lower_rad) - 0.0 / Norm)
+        np.testing.assert_allclose(inc_lower, lower_rad, atol=1e-12)
+        # u=1 => arccos(cos(lower_rad) - (cos(lower_rad)-cos(upper_rad))) = upper_rad
+        inc_upper = np.arccos(np.cos(lower_rad) - 1.0 / Norm)
+        np.testing.assert_allclose(inc_upper, upper_rad, atol=1e-12)
+
+
+@pytest.mark.unit
 class TestDeterminism:
     def test_all_functions_deterministic(self) -> None:
         u = np.random.default_rng(42).random(100)
