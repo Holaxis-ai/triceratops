@@ -184,11 +184,12 @@ class ValidationWorkspace:
         if self._population_provider is not None:
             from pathlib import Path
             from triceratops.domain.scenario_id import ScenarioID as _SID
-            from triceratops.scenarios.registry import DEFAULT_REGISTRY
 
-            eligible = DEFAULT_REGISTRY.all_scenarios()
+            registry = self._engine._registry
             if scenario_ids is not None:
-                eligible = [DEFAULT_REGISTRY.get(sid) for sid in scenario_ids]
+                eligible = [registry.get(sid) for sid in scenario_ids]
+            else:
+                eligible = registry.all_scenarios()
             needs_trilegal = any(
                 s.scenario_id in _SID.trilegal_scenarios() for s in eligible
             )
@@ -202,38 +203,23 @@ class ValidationWorkspace:
                     cache_path=cache,
                 )
 
-        # Build a PreparedValidationInputs and route through compute_prepared().
-        # This keeps the engine's input contract explicit and testable.
-        # scenario_ids filtering happens inside engine.compute() via scenario_ids arg.
-        # For now we pass scenario_ids=None in the prepared path (engine default logic
-        # applies) and fall back to compute() for scenario_id filtering.
-        if scenario_ids is None:
-            prepared = PreparedValidationInputs(
-                target_id=self.tic_id,
-                stellar_field=self._stellar_field,
-                light_curve=light_curve,
-                config=self.config,
-                period_days=period_days,
-                trilegal_population=trilegal_population,
-                external_lcs=external_lcs,
-                contrast_curve=contrast_curve,
-                molusc_file=molusc_file,
-            )
-            result = self._engine.compute_prepared(prepared)
-        else:
-            # scenario_ids filtering path: use compute() directly until compute_prepared
-            # supports scenario_ids selection (planned for a follow-up).
-            result = self._engine.compute(
-                light_curve=light_curve,
-                stellar_field=self._stellar_field,
-                period_days=period_days,
-                config=self.config,
-                scenario_ids=scenario_ids,
-                external_lcs=external_lcs,
-                contrast_curve=contrast_curve,
-                trilegal_population=trilegal_population,
-                molusc_file=molusc_file,
-            )
+        # All paths route through compute_prepared() so the field validation gate
+        # and scenario_ids consistency guards always apply.
+        # PreparedValidationInputs carries scenario_ids (job.py:78), so no separate
+        # fallback path to engine.compute() is needed.
+        prepared = PreparedValidationInputs(
+            target_id=self.tic_id,
+            stellar_field=self._stellar_field,
+            light_curve=light_curve,
+            config=self.config,
+            period_days=period_days,
+            trilegal_population=trilegal_population,
+            external_lcs=external_lcs,
+            contrast_curve=contrast_curve,
+            molusc_file=molusc_file,
+            scenario_ids=scenario_ids,
+        )
+        result = self._engine.compute_prepared(prepared)
 
         self._last_result = result
         return result

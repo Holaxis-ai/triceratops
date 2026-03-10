@@ -292,6 +292,47 @@ class TestResultAccess:
 # ---------------------------------------------------------------------------
 
 
+class TestComputeProbsScenarioIdsPath:
+    """compute_probs(scenario_ids=...) must route through compute_prepared(),
+    not bypass the field validation gate via engine.compute() directly."""
+
+    def _make_workspace_with_registry(self, registry: ScenarioRegistry) -> ValidationWorkspace:
+        ws = ValidationWorkspace(
+            tic_id=12345678,
+            sectors=np.array([1]),
+            catalog_provider=StubStarCatalogProvider(),
+            config=Config(n_mc_samples=100, n_best_samples=10),
+        )
+        ws._engine._registry = registry
+        return ws
+
+    def test_scenario_ids_path_returns_validation_result(
+        self, transit_lc: LightCurve,
+    ) -> None:
+        tp_result = _make_result(ScenarioID.TP, lnZ=0.0)
+        fake_tp = _FakeScenario(ScenarioID.TP, False, tp_result)
+        registry = ScenarioRegistry()
+        registry.register(fake_tp)
+
+        ws = self._make_workspace_with_registry(registry)
+        vr = ws.compute_probs(transit_lc, period_days=5.0, scenario_ids=[ScenarioID.TP])
+        assert isinstance(vr, ValidationResult)
+
+    def test_scenario_ids_path_validates_field(
+        self, transit_lc: LightCurve,
+    ) -> None:
+        """A corrupted field must raise ValueError even when scenario_ids is given."""
+        registry = ScenarioRegistry()
+        ws = self._make_workspace_with_registry(registry)
+
+        # Corrupt the field: swap target for a wrong star so stars[0].tic_id != target_id
+        wrong_star = _neighbor_star(tic_id=99999999)
+        ws._stellar_field.stars[0] = wrong_star  # direct corruption — bypasses guards
+
+        with pytest.raises(ValueError, match=r"stars\[0\]"):
+            ws.compute_probs(transit_lc, period_days=5.0, scenario_ids=[ScenarioID.TP])
+
+
 class TestComputeProbs:
     def test_compute_probs_returns_validation_result(
         self, transit_lc: LightCurve,
