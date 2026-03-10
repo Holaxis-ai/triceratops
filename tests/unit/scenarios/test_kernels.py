@@ -78,6 +78,82 @@ class TestComputeLnZ:
         expected = np.log(1.0 / 100.0)
         assert result == pytest.approx(expected, rel=1e-6)
 
+    # --- Numerical stability tests ---
+
+    def test_large_positive_lnL_no_overflow(self) -> None:
+        """Large positive lnL values must not overflow; result should be finite."""
+        lnL = np.full(100, 5000.0)
+        lnz_const = 0.0
+        result = compute_lnZ(lnL, lnz_const)
+        assert np.isfinite(result), "compute_lnZ overflowed for large positive lnL"
+        # lnL_max=5000, log(sum_exp/N)=log(1)=0; result = 5000 + lnz_const
+        assert result == pytest.approx(5000.0 + lnz_const, rel=1e-10)
+
+    def test_large_positive_lnL_with_lnz_const(self) -> None:
+        """Large positive lnL + nonzero lnz_const: result ≈ lnL_max + lnz_const."""
+        lnL = np.full(50, 5000.0)
+        lnz_const = 650.0
+        result = compute_lnZ(lnL, lnz_const)
+        assert np.isfinite(result)
+        assert result == pytest.approx(5000.0 + lnz_const, rel=1e-10)
+
+    def test_extreme_spread_underflows_gracefully(self) -> None:
+        """Values far below max underflow to 0; result is still finite."""
+        N = 200
+        lnL_max = 0.0
+        lnL = np.full(N, lnL_max - 800.0)
+        lnL[0] = lnL_max  # single value at max
+        result = compute_lnZ(lnL, 0.0)
+        assert np.isfinite(result), "result is not finite for extreme spread"
+        # Only index 0 contributes; exp(-800) underflows to 0 for others.
+        # result = lnL_max + log(1/N) = log(1/N)
+        expected = lnL_max + np.log(1.0 / N)
+        assert result == pytest.approx(expected, rel=1e-6)
+
+    def test_identical_values_equal_that_value(self) -> None:
+        """All lnL identical: log-sum-exp gives exactly that value (+ lnz_const)."""
+        lnL = np.full(300, -300.0)
+        lnz_const = 10.0
+        result = compute_lnZ(lnL, lnz_const)
+        assert np.isfinite(result)
+        # lnL_max=-300, log(sum_exp/N)=log(N/N)=0; result=-300+lnz_const
+        assert result == pytest.approx(-300.0 + lnz_const, rel=1e-10)
+
+    def test_single_finite_among_many_neg_inf(self) -> None:
+        """One finite value X among N-1 -inf entries: result ≈ X + lnz_const - log(N)."""
+        N = 500
+        X = -123.0
+        lnz_const = 50.0
+        lnL = np.full(N, -np.inf)
+        lnL[7] = X
+        result = compute_lnZ(lnL, lnz_const)
+        assert np.isfinite(result)
+        expected = X + lnz_const + np.log(1.0 / N)
+        assert result == pytest.approx(expected, rel=1e-8)
+
+    def test_large_N_all_zeros(self) -> None:
+        """N=1_000_000 draws all at 0.0: result ≈ lnz_const."""
+        N = 1_000_000
+        lnL = np.zeros(N)
+        lnz_const = 42.0
+        result = compute_lnZ(lnL, lnz_const)
+        assert np.isfinite(result)
+        # lnL_max=0, log(N/N)=0; result=0+lnz_const
+        assert result == pytest.approx(lnz_const, rel=1e-10)
+
+    def test_mixed_extreme_range_correct_result(self) -> None:
+        """Mixed lnL from -10000 to +100: max-anchored computation is correct."""
+        N = 1000
+        rng = np.random.default_rng(42)
+        lnL = rng.uniform(-10000.0, 100.0, size=N)
+        lnz_const = 0.0
+        result = compute_lnZ(lnL, lnz_const)
+        assert np.isfinite(result), "mixed extreme range produced non-finite result"
+        # Reference: only values near the max contribute; the max itself is ~100
+        lnL_max = np.max(lnL)
+        assert result <= lnL_max + lnz_const
+        assert result > -np.inf
+
 
 # ---------------------------------------------------------------------------
 # pack_best_indices
