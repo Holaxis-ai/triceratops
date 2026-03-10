@@ -25,10 +25,10 @@ class TRILEGALQueryError(RuntimeError):
 
 # TRILEGAL form URLs -- try v1.6 first, fall back to v1.5
 _TRILEGAL_URLS = [
-    "http://stev.oapd.inaf.it/cgi-bin/trilegal_1.6",
-    "http://stev.oapd.inaf.it/cgi-bin/trilegal_1.5",
+    "https://stev.oapd.inaf.it/cgi-bin/trilegal_1.6",
+    "https://stev.oapd.inaf.it/cgi-bin/trilegal_1.5",
 ]
-_TRILEGAL_BASE = "http://stev.oapd.inaf.it/"
+_TRILEGAL_BASE = "https://stev.oapd.inaf.it/"
 _PHOTSYS = "tab_mag_odfnew/tab_mag_TESS_2mass_kepler.dat"
 
 
