@@ -301,6 +301,27 @@ class ValidationEngine:
                     "Payload may be corrupted or assembled for a different registry."
                 )
 
+        # TRILEGAL presence check using the engine's actual registry.
+        # prepared.validate() defers this when scenario_ids=None because
+        # it cannot see the engine's registry.  Now that we have self._registry,
+        # we check the full scenario set that will actually run.
+        if prepared.trilegal_population is None:
+            from triceratops.domain.scenario_id import ScenarioID
+            from triceratops.validation.errors import PreparedInputIncompleteError
+            trilegal_ids = set(ScenarioID.trilegal_scenarios())
+            if prepared.scenario_ids is None:
+                active = self._registry.all_scenarios()
+            else:
+                active = [self._registry.get(sid) for sid in prepared.scenario_ids
+                          if sid in self._registry]
+            missing = [s.scenario_id for s in active if s.scenario_id in trilegal_ids]
+            if missing:
+                raise PreparedInputIncompleteError(
+                    f"trilegal_population is required for scenarios {missing} but was not provided. "
+                    "Pass a population_provider to ValidationPreparer or ValidationWorkspace, "
+                    "or exclude TRILEGAL-dependent scenarios via scenario_ids."
+                )
+
         return self.compute(
             light_curve=prepared.light_curve,
             stellar_field=prepared.stellar_field,

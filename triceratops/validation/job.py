@@ -140,8 +140,10 @@ class PreparedValidationInputs:
             )
 
         # 4. period_days must be positive and finite
+        # resolve_period() in scenarios/kernels.py accepts list *and* tuple ranges,
+        # so both must be handled here to avoid regressing tuple callers.
         period = self.period_days
-        if isinstance(period, list):
+        if isinstance(period, (list, tuple)):
             if len(period) != 2:
                 raise ValidationInputError(
                     f"period_days as a range must have exactly 2 elements [min, max], "

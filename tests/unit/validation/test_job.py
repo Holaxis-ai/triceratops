@@ -457,11 +457,17 @@ class TestComputePreparedScenarioIdsGuard:
     def test_none_scenario_ids_passes_guard(
         self, stellar_field: StellarField, lc: LightCurve, cfg: Config
     ) -> None:
-        """scenario_ids=None (run all) must not be rejected by the guard."""
+        """scenario_ids=None (run all) must not be rejected by the scenario_ids guard.
+
+        Uses a custom registry with no TRILEGAL scenarios so the TRILEGAL check
+        does not fire — isolating the 'None is not rejected' guard behavior.
+        """
+        from triceratops.scenarios.registry import ScenarioRegistry
         from triceratops.validation.engine import ValidationEngine
+        from triceratops.validation.errors import ValidationError
         from triceratops.validation.job import PreparedValidationInputs
 
-        engine = ValidationEngine()
+        engine = ValidationEngine(registry=ScenarioRegistry())  # empty — no TRILEGAL
         pvi = PreparedValidationInputs(
             target_id=stellar_field.target_id,
             stellar_field=stellar_field,
@@ -470,8 +476,8 @@ class TestComputePreparedScenarioIdsGuard:
             period_days=5.0,
             scenario_ids=None,
         )
-        # Should not raise ValueError from the scenario_ids guard
-        # (it may raise for other reasons like missing stellar_params, which is fine)
+        # Should not raise ValueError from the scenario_ids guard.
+        # Other ValidationErrors (e.g. stellar_params) are fine — only the guard is tested.
         try:
             engine.compute_prepared(pvi)
         except ValueError as e:
