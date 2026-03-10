@@ -40,13 +40,7 @@ class TestFoldAndClip:
         period = 3.5
         t = np.array([t0, t0 + period, t0 + 2 * period])
         phase = fold_and_clip(t, period, t0)
-        # phase should be 0 for each transit midpoint, but fold_and_clip gives
-        # ((t-t0) % P) - P/2 which is 0 - P/2 = -P/2 for exact t0
-        # Actually: (0 % 3.5) - 1.75 = -1.75 ... that's edge behaviour
-        # The fold wraps [0, P) -> [-P/2, P/2), so exact 0 maps to -P/2
-        # This is standard phase-fold behaviour at the boundary.
-        # Points very close to t0 should be near -P/2 or +P/2 (boundary)
-        assert np.allclose(np.abs(phase), period / 2, atol=1e-10)
+        assert np.allclose(phase, 0.0, atol=1e-10)
 
     def test_output_shape_matches_input(self):
         t = np.linspace(1468.0, 1475.0, 1000)

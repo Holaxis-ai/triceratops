@@ -35,7 +35,7 @@ def fold_and_clip(
 
     Returns phase in days with range (-period/2, +period/2).
     """
-    return ((time_btjd - t0_btjd) % period_days) - period_days / 2
+    return ((time_btjd - t0_btjd + period_days / 2) % period_days) - period_days / 2
 
 
 # ---------------------------------------------------------------------------
