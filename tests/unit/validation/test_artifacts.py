@@ -5,14 +5,17 @@ import numpy as np
 
 from auto_fpp.artifacts import (
     ARTIFACT_KIND_COMPUTE_READY,
+    ARTIFACT_KIND_LIGHTCURVE_CHECKPOINT,
     ARTIFACT_KIND_PREPARED,
     ARTIFACT_KIND_TARGET_CHECKPOINT,
     ApertureProvenance,
     ArtifactBundle,
     ArtifactHistoryEvent,
     ArtifactStageState,
+    AutoFppLightCurveCheckpoint,
     AutoFppPrepareCheckpoint,
     PreparedAutoFppArtifact,
+    PreparedSectorGeometry,
     SectorApertureManifest,
     SectorApertureSelection,
     default_artifact_capabilities,
@@ -312,6 +315,82 @@ def test_target_checkpoint_round_trips_to_bundle() -> None:
     assert loaded.resume_from == "lightcurve"
     assert loaded.resolved_target.tic_id == 12345
     assert loaded.transit_depth == 0.0015
+
+
+def test_lightcurve_checkpoint_round_trips_to_bundle() -> None:
+    checkpoint = AutoFppLightCurveCheckpoint(
+        resolved_target=ResolvedTarget(
+            target_ref="TOI-123.01",
+            tic_id=12345,
+            ephemeris=Ephemeris(
+                period_days=5.0,
+                t0_btjd=1000.0,
+                duration_hours=2.0,
+                source="exofop",
+            ),
+            source="exofop",
+        ),
+        light_curve_result=_light_curve_result(),
+        transit_depth=0.0015,
+        created_at_utc="2026-03-11T12:00:00Z",
+        code_version="0.0.0+local",
+        git_sha="abc123",
+        lightkurve_version="2.5.0",
+        aperture_selections=(
+            SectorApertureSelection(
+                sector=14,
+                requested_mode="default",
+                effective_mode="pipeline",
+                threshold_sigma=3.0,
+                n_pixels=2,
+            ),
+        ),
+        sector_geometries=(
+            PreparedSectorGeometry(
+                sector=14,
+                shape=(2, 2),
+                wcs_header={
+                    "CTYPE1": "RA---TAN",
+                    "CTYPE2": "DEC--TAN",
+                    "CRPIX1": 1.0,
+                    "CRPIX2": 1.0,
+                    "CRVAL1": 10.0,
+                    "CRVAL2": 20.0,
+                    "CDELT1": -0.0001,
+                    "CDELT2": 0.0001,
+                    "CUNIT1": "deg",
+                    "CUNIT2": "deg",
+                },
+                aperture_mask=np.array([[True, False], [False, False]]),
+                image=np.ones((2, 2)),
+            ),
+        ),
+        requested_sectors=(14, 15),
+        failed_sectors=(15,),
+        stages=(
+            ArtifactStageState(
+                name="target_resolution",
+                status="completed",
+                completed_at="2026-03-11T12:00:00Z",
+            ),
+            ArtifactStageState(
+                name="lightcurve",
+                status="completed",
+                completed_at="2026-03-11T12:01:00Z",
+            ),
+            ArtifactStageState(name="field", status="pending"),
+            ArtifactStageState(name="trilegal", status="pending"),
+            ArtifactStageState(name="store_upload", status="pending"),
+        ),
+    )
+
+    loaded = AutoFppLightCurveCheckpoint.from_bundle(checkpoint.to_bundle())
+
+    assert loaded.artifact_kind == ARTIFACT_KIND_LIGHTCURVE_CHECKPOINT
+    assert loaded.resume_from == "field"
+    assert loaded.requested_sectors == (14, 15)
+    assert loaded.failed_sectors == (15,)
+    assert loaded.sector_geometries[0].sector == 14
 
 
 def test_make_prepared_artifact_without_trilegal_is_not_compute_ready() -> None:
