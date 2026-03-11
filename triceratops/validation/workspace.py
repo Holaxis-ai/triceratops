@@ -281,10 +281,11 @@ class ValidationWorkspace:
         from triceratops.validation.errors import UnsupportedComputeModeError
 
         # Mission gate -- fail before any provider IO.
-        if self._ensure_stellar_field().mission != "TESS":
+        field = self._ensure_stellar_field()
+        if field.mission != "TESS":
             raise UnsupportedComputeModeError(
                 f"prepare() only supports mission='TESS'. "
-                f"Stellar field has mission={self._ensure_stellar_field().mission!r}."
+                f"Stellar field has mission={field.mission!r}."
             )
 
         # Assemble via orchestrator -- TRILEGAL fetch happens here if needed.
