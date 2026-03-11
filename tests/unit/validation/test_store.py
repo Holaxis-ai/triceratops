@@ -10,7 +10,7 @@ from types import SimpleNamespace
 import numpy as np
 import pytest
 
-from auto_fpp.artifacts import make_prepared_artifact
+from auto_fpp.artifacts import AutoFppPrepareCheckpoint, make_prepared_artifact
 from auto_fpp.outputs import with_preparation_outputs
 from auto_fpp.store import (
     FilesystemPreparedArtifactStore,
@@ -85,6 +85,22 @@ def _artifact():
     )
 
 
+def _target_checkpoint() -> AutoFppPrepareCheckpoint:
+    return AutoFppPrepareCheckpoint(
+        resolved_target=ResolvedTarget(
+            target_ref="TOI-123.01",
+            tic_id=12345,
+            ephemeris=Ephemeris(period_days=5.0, t0_btjd=1000.0),
+            source="exofop",
+        ),
+        transit_depth=0.001,
+        created_at_utc="2026-03-11T12:00:00Z",
+        code_version="0.0.0+local",
+        git_sha="abc123",
+        lightkurve_version="2.5.0",
+    )
+
+
 def test_filesystem_store_put_and_get_round_trip(tmp_path) -> None:
     artifact = _artifact()
     store = FilesystemPreparedArtifactStore(tmp_path)
@@ -111,6 +127,18 @@ def test_filesystem_store_uses_explicit_key(tmp_path) -> None:
         locator=str(tmp_path / "custom-key"),
         store_kind="filesystem",
     )
+
+
+def test_filesystem_store_round_trips_target_checkpoint(tmp_path) -> None:
+    checkpoint = _target_checkpoint()
+    store = FilesystemPreparedArtifactStore(tmp_path)
+
+    ref = store.put(checkpoint, key="target-checkpoint")
+    loaded = store.get(ref)
+
+    assert isinstance(loaded, AutoFppPrepareCheckpoint)
+    assert loaded.resume_from == "lightcurve"
+    assert loaded.resolved_target.tic_id == 12345
 
 
 def test_filesystem_store_replace_updates_existing_locator(tmp_path) -> None:

@@ -6,10 +6,12 @@ import numpy as np
 from auto_fpp.artifacts import (
     ARTIFACT_KIND_COMPUTE_READY,
     ARTIFACT_KIND_PREPARED,
+    ARTIFACT_KIND_TARGET_CHECKPOINT,
     ApertureProvenance,
     ArtifactBundle,
     ArtifactHistoryEvent,
     ArtifactStageState,
+    AutoFppPrepareCheckpoint,
     PreparedAutoFppArtifact,
     SectorApertureManifest,
     SectorApertureSelection,
@@ -263,6 +265,53 @@ def test_artifact_bundle_round_trips_through_directory(tmp_path) -> None:
 
     assert "manifest.json" in loaded_bundle.files
     assert loaded.resolved_target.tic_id == artifact.resolved_target.tic_id
+
+
+def test_target_checkpoint_round_trips_to_bundle() -> None:
+    checkpoint = AutoFppPrepareCheckpoint(
+        resolved_target=ResolvedTarget(
+            target_ref="TOI-123.01",
+            tic_id=12345,
+            ephemeris=Ephemeris(
+                period_days=5.0,
+                t0_btjd=1000.0,
+                duration_hours=2.0,
+                source="exofop",
+            ),
+            source="exofop",
+        ),
+        transit_depth=0.0015,
+        created_at_utc="2026-03-11T12:00:00Z",
+        code_version="0.0.0+local",
+        git_sha="abc123",
+        lightkurve_version="2.5.0",
+        stages=(
+            ArtifactStageState(
+                name="target_resolution",
+                status="completed",
+                completed_at="2026-03-11T12:00:00Z",
+                outputs={"tic_id": 12345},
+            ),
+            ArtifactStageState(name="lightcurve", status="pending"),
+            ArtifactStageState(name="field", status="pending"),
+            ArtifactStageState(name="trilegal", status="pending"),
+            ArtifactStageState(name="store_upload", status="pending"),
+        ),
+        history=(
+            ArtifactHistoryEvent(
+                stage="target_resolution",
+                event="completed",
+                at="2026-03-11T12:00:00Z",
+            ),
+        ),
+    )
+
+    loaded = AutoFppPrepareCheckpoint.from_bundle(checkpoint.to_bundle())
+
+    assert loaded.artifact_kind == ARTIFACT_KIND_TARGET_CHECKPOINT
+    assert loaded.resume_from == "lightcurve"
+    assert loaded.resolved_target.tic_id == 12345
+    assert loaded.transit_depth == 0.0015
 
 
 def test_make_prepared_artifact_without_trilegal_is_not_compute_ready() -> None:
