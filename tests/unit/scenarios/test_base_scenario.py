@@ -49,11 +49,22 @@ class _MinimalTPScenario(BaseScenario):
         n = config.n_mc_samples
         return np.full(n, -1.0), None
 
-    def _pack_result(self, samples, geom, ldc, lnZ, idx, sp, ext, twin=False):
+    def _pack_result(
+        self,
+        samples,
+        geom,
+        ldc,
+        lnZ,
+        idx,
+        sp,
+        ext,
+        host_star_tic_id,
+        twin=False,
+    ):
         n = len(idx)
         return ScenarioResult(
             scenario_id=ScenarioID.TP,
-            host_star_tic_id=0,
+            host_star_tic_id=host_star_tic_id,
             ln_evidence=lnZ,
             host_mass_msun=np.ones(n),
             host_radius_rsun=np.ones(n),
@@ -111,12 +122,23 @@ class _MinimalEBScenario(BaseScenario):
         n = config.n_mc_samples
         return np.full(n, -1.0), np.full(n, -2.0)
 
-    def _pack_result(self, samples, geom, ldc, lnZ, idx, sp, ext, twin=False):
+    def _pack_result(
+        self,
+        samples,
+        geom,
+        ldc,
+        lnZ,
+        idx,
+        sp,
+        ext,
+        host_star_tic_id,
+        twin=False,
+    ):
         n = len(idx)
         sid = ScenarioID.EBX2P if twin else ScenarioID.EB
         return ScenarioResult(
             scenario_id=sid,
-            host_star_tic_id=0,
+            host_star_tic_id=host_star_tic_id,
             ln_evidence=lnZ,
             host_mass_msun=np.ones(n),
             host_radius_rsun=np.ones(n),
@@ -281,8 +303,9 @@ class TestStellarLoggFromMassRadius:
 
     def test_solar_logg_approx_4_44(self) -> None:
         """M=1 Msun, R=1 Rsun should yield logg ≈ 4.44 (accepted solar value)."""
-        from triceratops.config.config import CONST
         import math
+
+        from triceratops.config.config import CONST
         params = self._make_params(1.0, 1.0)
         result = self._logg_fn(params)
         expected = math.log10(CONST.G * CONST.Msun / CONST.Rsun ** 2)
@@ -304,8 +327,9 @@ class TestStellarLoggFromMassRadius:
 
     def test_logg_formula_matches_manual_calculation(self) -> None:
         """Verify against log10(G * M * Msun / (R * Rsun)^2) using CONST values."""
-        from triceratops.config.config import CONST
         import math
+
+        from triceratops.config.config import CONST
         mass, radius = 1.5, 2.0
         params = self._make_params(mass, radius)
         expected = math.log10(
