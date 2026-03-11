@@ -19,7 +19,20 @@ from triceratops.lightcurve.sources.file import FileSource
 from triceratops.lightcurve.sources.lightkurve import LightkurveSource
 
 # ExoFOP
-from triceratops.lightcurve.exofop.toi_resolution import ExoFopEphemerisResolver
+from triceratops.lightcurve.exofop.toi_resolution import (
+    ExoFopEphemerisResolver,
+    LookupStatus,
+    ToiResolutionResult,
+    resolve_toi_to_tic_ephemeris_depth,
+)
+
+# Public lightkurve-backed prep helpers used by higher-level orchestration layers
+from triceratops.lightcurve.sources.lightkurve import (
+    fold_lightcurve,
+    process_lightcurve_collection,
+    resolve_cadence_label,
+    trim_folded_lightcurve,
+)
 
 # Errors
 from triceratops.lightcurve.errors import (
@@ -49,6 +62,14 @@ __all__ = [
     "FileSource",
     # ExoFOP
     "ExoFopEphemerisResolver",
+    "LookupStatus",
+    "ToiResolutionResult",
+    "resolve_toi_to_tic_ephemeris_depth",
+    # Public prep helpers
+    "process_lightcurve_collection",
+    "fold_lightcurve",
+    "trim_folded_lightcurve",
+    "resolve_cadence_label",
     # Errors
     "LightCurveError",
     "LightCurveNotFoundError",
