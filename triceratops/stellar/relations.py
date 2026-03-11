@@ -112,6 +112,18 @@ _FLUX_NODES_K = np.array([-4.7, -2.9, -1.7, -0.7, 0.6, 1.6, 3, 3.3, 4, 6]) / 2.5
 
 # Supported filter names for get_flux_ratio
 _SUPPORTED_FILTERS = frozenset({"TESS", "Vis", "Kepler", "J", "H", "K", "g", "r", "i", "z"})
+_FILTER_ALIASES = {
+    "Ks": "K",
+    "Kcont": "K",
+    "Kp": "Kepler",
+    "562nm": "Vis",
+    "832nm": "Vis",
+}
+
+
+def canonicalize_filter_name(filter_name: str) -> str:
+    """Map common mission/imaging aliases onto the canonical flux-relation filters."""
+    return _FILTER_ALIASES.get(filter_name, filter_name)
 
 
 class StellarRelations:
@@ -230,6 +242,7 @@ class StellarRelations:
         Raises:
             ValueError: If filter_name is not recognized.
         """
+        filter_name = canonicalize_filter_name(filter_name)
         if filter_name not in _SUPPORTED_FILTERS:
             raise ValueError(
                 f"Unknown filter {filter_name!r}. "
