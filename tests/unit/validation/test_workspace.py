@@ -6,13 +6,13 @@ from dataclasses import dataclass
 import numpy as np
 import pytest
 
+from triceratops.assembly.errors import CatalogAcquisitionError
 from triceratops.config.config import Config
-from triceratops.domain.entities import LightCurve, Star, StellarField
+from triceratops.domain.entities import ExternalLightCurve, LightCurve, Star, StellarField
 from triceratops.domain.result import ScenarioResult, ValidationResult
 from triceratops.domain.scenario_id import ScenarioID
 from triceratops.domain.value_objects import StellarParameters
 from triceratops.scenarios.registry import ScenarioRegistry
-from triceratops.assembly.errors import CatalogAcquisitionError
 from triceratops.validation.workspace import ValidationWorkspace
 
 # ---------------------------------------------------------------------------
@@ -94,6 +94,10 @@ def _make_result(sid: ScenarioID, lnZ: float, n: int = 10) -> ScenarioResult:
         companion_mass_msun=np.zeros(n),
         companion_radius_rsun=np.zeros(n),
         flux_ratio_companion_tess=np.zeros(n),
+        external_lc_u1=[np.full(n, 0.45)],
+        external_lc_u2=[np.full(n, 0.25)],
+        external_lc_flux_ratio_eb=[np.zeros(n)],
+        external_lc_flux_ratio_comp=[np.zeros(n)],
     )
 
 
@@ -147,6 +151,15 @@ def transit_lc() -> LightCurve:
     flux = np.ones(50)
     flux[20:30] = 0.999
     return LightCurve(time_days=time, flux=flux, flux_err=0.001)
+
+
+@pytest.fixture()
+def external_lc() -> ExternalLightCurve:
+    time = np.linspace(-0.1, 0.1, 40)
+    flux = np.ones(40)
+    flux[16:24] = 0.998
+    lc = LightCurve(time_days=time, flux=flux, flux_err=0.0015)
+    return ExternalLightCurve(light_curve=lc, band="J")
 
 
 @pytest.fixture()
@@ -397,7 +410,6 @@ class TestCalcDepths:
 
     def test_calc_depths_sets_flux_ratio(self, workspace: ValidationWorkspace) -> None:
         """After calc_depths(), every star must have a non-None flux_ratio."""
-        n_stars = len(workspace.stars)
         # One sector: star pixel coords (n_stars, 2), aperture pixels (4, 2)
         pixel_coords = [np.array([[5.0, 5.0], [6.0, 5.0]])]  # target + 1 neighbour
         aperture_pixels = [np.array([[5, 5], [5, 6], [6, 5], [6, 6]], dtype=float)]
@@ -458,3 +470,86 @@ class TestPlotFitsGuard:
         """plot_fits() raises RuntimeError when _last_result is None."""
         with pytest.raises(RuntimeError, match="compute_probs"):
             workspace.plot_fits()
+
+    def test_plot_fits_palomar_without_external_lcs_raises(
+        self, workspace: ValidationWorkspace,
+    ) -> None:
+        workspace._last_result = ValidationResult(
+            target_id=12345678,
+            false_positive_probability=0.5,
+            nearby_false_positive_probability=0.0,
+            scenario_results=[],
+        )
+        with pytest.raises(RuntimeError, match="No external light curves stored"):
+            workspace.plot_fits_palomar()
+
+    def test_plot_fits_joint_without_external_lcs_raises(
+        self, workspace: ValidationWorkspace, transit_lc: LightCurve,
+    ) -> None:
+        workspace._last_result = ValidationResult(
+            target_id=12345678,
+            false_positive_probability=0.5,
+            nearby_false_positive_probability=0.0,
+            scenario_results=[],
+        )
+        workspace._last_light_curve = transit_lc
+        with pytest.raises(RuntimeError, match="No external light curves stored"):
+            workspace.plot_fits_joint()
+
+    def test_plot_fits_palomar_delegates(
+        self,
+        workspace: ValidationWorkspace,
+        monkeypatch: pytest.MonkeyPatch,
+        external_lc: ExternalLightCurve,
+    ) -> None:
+        called: dict[str, object] = {}
+        workspace._last_result = ValidationResult(
+            target_id=12345678,
+            false_positive_probability=0.5,
+            nearby_false_positive_probability=0.0,
+            scenario_results=[],
+        )
+        workspace._last_external_lcs = [external_lc]
+
+        def _fake_plot(ext_lc, result, **kwargs):
+            called["ext_lc"] = ext_lc
+            called["result"] = result
+            called["kwargs"] = kwargs
+
+        monkeypatch.setattr("triceratops.plotting.plot_fits_palomar", _fake_plot)
+        workspace.plot_fits_palomar(save=True)
+
+        assert called["ext_lc"] is external_lc
+        assert called["result"] is workspace._last_result
+        assert called["kwargs"] == {"external_lc_index": 0, "save": True}
+
+    def test_plot_fits_joint_delegates(
+        self,
+        workspace: ValidationWorkspace,
+        monkeypatch: pytest.MonkeyPatch,
+        transit_lc: LightCurve,
+        external_lc: ExternalLightCurve,
+    ) -> None:
+        called: dict[str, object] = {}
+        workspace._last_result = ValidationResult(
+            target_id=12345678,
+            false_positive_probability=0.5,
+            nearby_false_positive_probability=0.0,
+            scenario_results=[],
+        )
+        workspace._last_light_curve = transit_lc
+        workspace._last_external_lcs = [external_lc]
+
+        def _fake_plot(light_curve, ext_lc, result, **kwargs):
+            called["light_curve"] = light_curve
+            called["ext_lc"] = ext_lc
+            called["result"] = result
+            called["kwargs"] = kwargs
+
+        monkeypatch.setattr("triceratops.plotting.plot_fits_joint", _fake_plot)
+        workspace.plot_fits_joint(save=True)
+
+        assert called["light_curve"] is transit_lc
+        assert called["ext_lc"] is external_lc
+        assert called["result"] is workspace._last_result
+        assert called["kwargs"] == {"external_lc_index": 0, "save": True}

@@ -81,6 +81,7 @@ class ValidationWorkspace:
 
         self._last_result: ValidationResult | None = None
         self._last_light_curve: LightCurve | None = None
+        self._last_external_lcs: list[ExternalLightCurve] | None = None
 
         self._engine = ValidationEngine(
             catalog_provider=self._catalog_provider,
@@ -383,8 +384,9 @@ class ValidationWorkspace:
         """
         result = self._engine.compute_prepared(prepared)
         self._last_result = result
-        # Store light_curve for plot_fits() access
+        # Store the last prepared observables for plotting helpers.
         self._last_light_curve = prepared.light_curve
+        self._last_external_lcs = prepared.external_lcs
         return result
 
     def compute_probs(
@@ -474,3 +476,56 @@ class ValidationWorkspace:
                 "No light curve stored; re-run compute_probs() to populate it."
             )
         plot_fits(self._last_light_curve, self._last_result, **kwargs)
+
+    def plot_fits_palomar(
+        self,
+        external_lc_index: int = 0,
+        **kwargs: Any,
+    ) -> None:
+        """Plot best-fit models against one stored external light curve."""
+        from triceratops.plotting import plot_fits_palomar
+
+        if self._last_result is None:
+            raise RuntimeError(
+                "compute_probs() must be called before plot_fits_palomar()"
+            )
+        if not self._last_external_lcs:
+            raise RuntimeError(
+                "No external light curves stored; re-run compute_probs() with "
+                "external_lcs to populate them."
+            )
+        plot_fits_palomar(
+            self._last_external_lcs[external_lc_index],
+            self._last_result,
+            external_lc_index=external_lc_index,
+            **kwargs,
+        )
+
+    def plot_fits_joint(
+        self,
+        external_lc_index: int = 0,
+        **kwargs: Any,
+    ) -> None:
+        """Plot TESS and external best-fit models together."""
+        from triceratops.plotting import plot_fits_joint
+
+        if self._last_result is None:
+            raise RuntimeError(
+                "compute_probs() must be called before plot_fits_joint()"
+            )
+        if self._last_light_curve is None:
+            raise RuntimeError(
+                "No light curve stored; re-run compute_probs() to populate it."
+            )
+        if not self._last_external_lcs:
+            raise RuntimeError(
+                "No external light curves stored; re-run compute_probs() with "
+                "external_lcs to populate them."
+            )
+        plot_fits_joint(
+            self._last_light_curve,
+            self._last_external_lcs[external_lc_index],
+            self._last_result,
+            external_lc_index=external_lc_index,
+            **kwargs,
+        )
