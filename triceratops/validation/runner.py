@@ -1,6 +1,7 @@
 """High-level end-to-end runner for tutorial-style TESS FPP calculations."""
 from __future__ import annotations
 
+from copy import deepcopy
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Literal
@@ -32,6 +33,12 @@ from triceratops.lightcurve.sources.lightkurve import (
     resolve_cadence_label,
     trim_folded_lightcurve,
 )
+from triceratops.validation.artifacts import (
+    ApertureProvenance,
+    PreparedAutoFppArtifact,
+    make_prepared_artifact,
+)
+from triceratops.validation.job import PreparedValidationInputs
 from triceratops.validation.workspace import ValidationWorkspace
 
 if TYPE_CHECKING:
@@ -117,34 +124,87 @@ class FppRunResult:
 
 
 @dataclass(frozen=True)
+class AutoFppPrepareConfig:
+    """Configuration for the durable auto-FPP preparation phase."""
+
+    aperture: ApertureConfig = field(default_factory=ApertureConfig)
+    lightcurve: LightCurveConfig = field(default_factory=LightCurveConfig)
+    transit_depth: float | None = None
+    search_radius_px: int = 10
+    sigma_psf_px: float = 0.75
+    bin_count: int | None = None
+    include_unbinned_folded_lightcurve: bool = False
+    include_aperture_provenance: bool = True
+    materialize_trilegal: bool = False
+    exofop_cache_ttl_seconds: int = 6 * 3600
+    exofop_disk_cache_dir: str | Path | None = None
+
+    def __post_init__(self) -> None:
+        if self.bin_count is not None and self.bin_count < 2:
+            raise ValueError(f"bin_count must be >= 2 or None, got {self.bin_count}")
+        if self.transit_depth is not None and self.transit_depth <= 0:
+            raise ValueError(
+                f"transit_depth must be positive or None, got {self.transit_depth}"
+            )
+        if self.search_radius_px < 1:
+            raise ValueError(
+                f"search_radius_px must be >= 1, got {self.search_radius_px}"
+            )
+        if self.sigma_psf_px <= 0:
+            raise ValueError(f"sigma_psf_px must be positive, got {self.sigma_psf_px}")
+
+
+@dataclass(frozen=True)
+class AutoFppComputeConfig:
+    """Configuration for compute from a durable auto-FPP artifact."""
+
+    compute: Config = field(default_factory=Config)
+    scenario_ids: tuple[ScenarioID, ...] | None = None
+    trilegal_cache_path: str | None = None
+
+    def __post_init__(self) -> None:
+        if self.compute.mission != "TESS":
+            raise ValueError(
+                "compute_auto_fpp only supports compute.mission='TESS', "
+                f"got {self.compute.mission!r}"
+            )
+
+
+@dataclass(frozen=True)
 class _PreparedApertureLightCurve:
     light_curve_result: LightCurvePreparationResult
-    aperture_masks: tuple[np.ndarray, ...]
-    tpfs: tuple[object, ...]
+    unbinned_light_curve: LightCurvePreparationResult | None = None
+    aperture_masks: tuple[np.ndarray, ...] = ()
+    tpfs: tuple[object, ...] = ()
 
 
-def run_tess_fpp(
+def prepare_auto_fpp(
     target: str | int,
     *,
-    config: FppRunConfig | None = None,
+    config: AutoFppPrepareConfig | None = None,
     ephemeris: Ephemeris | None = None,
-) -> FppRunResult:
-    """Run a tutorial-style TESS FPP validation in one call.
-
-    This orchestration layer owns target resolution, aperture selection,
-    lightkurve photometry, transit-depth computation, and the final FPP run.
-    """
-    cfg = config or FppRunConfig()
-    resolved_target, transit_depth = _resolve_target_and_depth(target, cfg, ephemeris)
-    prepared_lc = _prepare_tpf_lightcurve(resolved_target, cfg)
+) -> PreparedAutoFppArtifact:
+    """Prepare a durable auto-FPP artifact for later compute."""
+    cfg = config or AutoFppPrepareConfig()
+    resolved_target, transit_depth = _resolve_target_and_depth(
+        target,
+        _prepare_config_to_resolution_view(cfg),
+        ephemeris,
+    )
+    prepare_kwargs: dict[str, object] = {}
+    if cfg.include_unbinned_folded_lightcurve:
+        prepare_kwargs["include_unbinned_folded"] = True
+    prepared_lc = _prepare_tpf_lightcurve(
+        resolved_target,
+        _prepare_config_to_resolution_view(cfg),
+        **prepare_kwargs,
+    )
 
     workspace = ValidationWorkspace(
         tic_id=resolved_target.tic_id,
         sectors=np.asarray(prepared_lc.light_curve_result.sectors_used, dtype=int),
         mission="TESS",
         search_radius=cfg.search_radius_px,
-        config=cfg.compute,
-        trilegal_cache_path=cfg.trilegal_cache_path,
     )
     workspace.set_resolved_target(resolved_target)
     field = workspace.fetch_catalog()
@@ -160,18 +220,96 @@ def run_tess_fpp(
         aperture_pixels_per_sector=aperture_pixels_per_sector,
         sigma_psf_px=cfg.sigma_psf_px,
     )
-    validation_result = workspace.compute_probs(
-        prepared_lc.light_curve_result.light_curve,
-        resolved_target.ephemeris.period_days,
-        scenario_ids=list(cfg.scenario_ids) if cfg.scenario_ids is not None else None,
-    )
-    return FppRunResult(
+
+    trilegal_population = None
+    if cfg.materialize_trilegal:
+        prepared_inputs = workspace.prepare(
+            light_curve=prepared_lc.light_curve_result.light_curve,
+            period_days=resolved_target.ephemeris.period_days,
+        )
+        trilegal_population = prepared_inputs.trilegal_population
+
+    aperture_provenance = None
+    if cfg.include_aperture_provenance:
+        aperture_provenance = ApertureProvenance(
+            aperture_masks=prepared_lc.aperture_masks,
+            aperture_pixels_per_sector=tuple(aperture_pixels_per_sector),
+            pixel_coords_per_sector=tuple(pixel_coords_per_sector),
+        )
+
+    return make_prepared_artifact(
         resolved_target=resolved_target,
         light_curve_result=prepared_lc.light_curve_result,
+        stellar_field=field,
+        transit_depth=transit_depth,
+        aperture_mode=cfg.aperture.mode,
+        aperture_threshold_sigma=cfg.aperture.threshold_sigma,
+        custom_aperture_pixels=cfg.aperture.custom_pixels,
+        bin_count=cfg.bin_count,
+        search_radius_px=cfg.search_radius_px,
+        sigma_psf_px=cfg.sigma_psf_px,
+        lightcurve_config=cfg.lightcurve,
+        warnings=tuple(prepared_lc.light_curve_result.warnings),
+        source_labels=("lightkurve",),
+        aperture_provenance=aperture_provenance,
+        trilegal_population=trilegal_population,
+        unbinned_light_curve=(
+            None
+            if prepared_lc.unbinned_light_curve is None
+            else prepared_lc.unbinned_light_curve.light_curve
+        ),
+    )
+
+
+def compute_auto_fpp(
+    prepared: PreparedAutoFppArtifact,
+    *,
+    config: AutoFppComputeConfig | None = None,
+) -> ValidationResult:
+    """Run FPP from a prepared auto-FPP artifact."""
+    result, _ = _compute_prepared_artifact(
+        prepared,
+        config or AutoFppComputeConfig(),
+    )
+    return result
+
+
+def run_tess_fpp(
+    target: str | int,
+    *,
+    config: FppRunConfig | None = None,
+    ephemeris: Ephemeris | None = None,
+) -> FppRunResult:
+    """Run a tutorial-style TESS FPP validation in one call.
+
+    This orchestration layer owns target resolution, aperture selection,
+    lightkurve photometry, transit-depth computation, and the final FPP run.
+    """
+    cfg = config or FppRunConfig()
+    prepared = prepare_auto_fpp(
+        target,
+        config=_run_to_prepare_config(cfg),
+        ephemeris=ephemeris,
+    )
+    validation_result, workspace = _compute_prepared_artifact(
+        prepared,
+        AutoFppComputeConfig(
+            compute=cfg.compute,
+            scenario_ids=cfg.scenario_ids,
+            trilegal_cache_path=cfg.trilegal_cache_path,
+        ),
+    )
+    return FppRunResult(
+        resolved_target=prepared.resolved_target,
+        light_curve_result=prepared.light_curve_result,
         validation_result=validation_result,
         workspace=workspace,
-        transit_depth=transit_depth,
-        aperture_masks=prepared_lc.aperture_masks,
+        transit_depth=prepared.transit_depth,
+        aperture_masks=(
+            ()
+            if prepared.aperture_provenance is None
+            else prepared.aperture_provenance.aperture_masks
+        ),
     )
 
 
@@ -248,6 +386,8 @@ def _resolve_transit_depth(
 def _prepare_tpf_lightcurve(
     target: ResolvedTarget,
     config: FppRunConfig,
+    *,
+    include_unbinned_folded: bool = False,
 ) -> _PreparedApertureLightCurve:
     import lightkurve as lk
 
@@ -272,6 +412,12 @@ def _prepare_tpf_lightcurve(
     lc_coll = lk.LightCurveCollection(lightcurves)
     lc = process_lightcurve_collection(lc_coll, config.lightcurve, tic_id=target.tic_id)
     folded = fold_lightcurve(lc, target.ephemeris)
+    unbinned_trimmed = trim_folded_lightcurve(
+        folded,
+        target.ephemeris,
+        config.lightcurve,
+        tic_id=target.tic_id,
+    )
     # Preserve lightkurve's binning implementation at the orchestration boundary.
     if config.bin_count is not None:
         folded = folded.bin(bins=config.bin_count)
@@ -284,6 +430,19 @@ def _prepare_tpf_lightcurve(
 
     cadence_used = resolve_cadence_label(lc, config.lightcurve.cadence)
     lc_domain = convert_folded_to_domain(trimmed, cadence=cadence_used, config=config.lightcurve)
+    unbinned_domain = None
+    if include_unbinned_folded:
+        unbinned_domain = LightCurvePreparationResult(
+            light_curve=convert_folded_to_domain(
+                unbinned_trimmed,
+                cadence=cadence_used,
+                config=config.lightcurve,
+            ),
+            ephemeris=target.ephemeris,
+            sectors_used=_extract_tpf_sectors(tpfs),
+            cadence_used=cadence_used,
+            warnings=[],
+        )
     sectors_used = _extract_tpf_sectors(tpfs)
     return _PreparedApertureLightCurve(
         light_curve_result=LightCurvePreparationResult(
@@ -293,6 +452,7 @@ def _prepare_tpf_lightcurve(
             cadence_used=cadence_used,
             warnings=[],
         ),
+        unbinned_light_curve=unbinned_domain,
         aperture_masks=aperture_masks,
         tpfs=tpfs,
     )
@@ -432,9 +592,112 @@ def _parse_tic_target(target: str | int) -> int | None:
     return int(text) if text.isdigit() else None
 
 
+def _run_to_prepare_config(config: FppRunConfig) -> AutoFppPrepareConfig:
+    return AutoFppPrepareConfig(
+        aperture=config.aperture,
+        lightcurve=config.lightcurve,
+        transit_depth=config.transit_depth,
+        search_radius_px=config.search_radius_px,
+        sigma_psf_px=config.sigma_psf_px,
+        bin_count=config.bin_count,
+        include_unbinned_folded_lightcurve=False,
+        include_aperture_provenance=True,
+        materialize_trilegal=False,
+        exofop_cache_ttl_seconds=config.exofop_cache_ttl_seconds,
+        exofop_disk_cache_dir=config.exofop_disk_cache_dir,
+    )
+
+
+def _prepare_config_to_resolution_view(config: AutoFppPrepareConfig) -> FppRunConfig:
+    return FppRunConfig(
+        aperture=config.aperture,
+        lightcurve=config.lightcurve,
+        bin_count=config.bin_count,
+        transit_depth=config.transit_depth,
+        search_radius_px=config.search_radius_px,
+        sigma_psf_px=config.sigma_psf_px,
+        exofop_cache_ttl_seconds=config.exofop_cache_ttl_seconds,
+        exofop_disk_cache_dir=config.exofop_disk_cache_dir,
+    )
+
+
+def _compute_prepared_artifact(
+    prepared: PreparedAutoFppArtifact,
+    config: AutoFppComputeConfig,
+) -> tuple[ValidationResult, ValidationWorkspace]:
+    if prepared.resolved_target.ephemeris is None:
+        raise EphemerisRequiredError(
+            f"Prepared artifact for TIC {prepared.resolved_target.tic_id} has no ephemeris"
+        )
+
+    workspace_kwargs = {
+        "tic_id": prepared.resolved_target.tic_id,
+        "sectors": np.asarray(prepared.light_curve_result.sectors_used, dtype=int),
+        "mission": prepared.stellar_field.mission,
+        "search_radius": prepared.search_radius_px,
+        "config": config.compute,
+        "trilegal_cache_path": config.trilegal_cache_path,
+    }
+    try:
+        workspace = ValidationWorkspace(
+            **workspace_kwargs,
+            stellar_field=deepcopy(prepared.stellar_field),
+        )
+    except TypeError as exc:
+        if "stellar_field" not in str(exc):
+            raise
+        workspace = ValidationWorkspace(**workspace_kwargs)
+        if hasattr(workspace, "_stellar_field"):
+            workspace._stellar_field = deepcopy(prepared.stellar_field)  # type: ignore[attr-defined]
+        if hasattr(workspace, "field"):
+            workspace.field = deepcopy(prepared.stellar_field)  # type: ignore[attr-defined]
+    workspace.set_resolved_target(prepared.resolved_target)
+
+    requested_scenarios = (
+        list(config.scenario_ids) if config.scenario_ids is not None else None
+    )
+    if not hasattr(workspace, "compute_prepared") and hasattr(workspace, "compute_probs"):
+        result = workspace.compute_probs(
+            prepared.light_curve_result.light_curve,
+            prepared.resolved_target.ephemeris.period_days,
+            scenario_ids=requested_scenarios,
+        )
+        return result, workspace
+
+    if _scenarios_require_trilegal(requested_scenarios) and prepared.trilegal_population is None:
+        prepared_inputs = workspace.prepare(
+            light_curve=prepared.light_curve_result.light_curve,
+            period_days=prepared.resolved_target.ephemeris.period_days,
+            scenario_ids=requested_scenarios,
+        )
+    else:
+        prepared_inputs = PreparedValidationInputs(
+            target_id=prepared.resolved_target.tic_id,
+            stellar_field=workspace.fetch_catalog(),
+            light_curve=prepared.light_curve_result.light_curve,
+            config=config.compute,
+            period_days=prepared.resolved_target.ephemeris.period_days,
+            trilegal_population=prepared.trilegal_population,
+            scenario_ids=requested_scenarios,
+        )
+    return workspace.compute_prepared(prepared_inputs), workspace
+
+
+def _scenarios_require_trilegal(
+    scenario_ids: list[ScenarioID] | None,
+) -> bool:
+    if scenario_ids is None:
+        return True
+    return any(sid in ScenarioID.trilegal_scenarios() for sid in scenario_ids)
+
+
 __all__ = [
     "ApertureConfig",
+    "AutoFppComputeConfig",
+    "AutoFppPrepareConfig",
     "FppRunConfig",
     "FppRunResult",
+    "compute_auto_fpp",
+    "prepare_auto_fpp",
     "run_tess_fpp",
 ]

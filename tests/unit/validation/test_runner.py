@@ -14,8 +14,17 @@ from triceratops.lightcurve.exofop.toi_resolution import (
     LookupStatus,
     ToiResolutionResult,
 )
+from triceratops.population.protocols import TRILEGALResult
 from triceratops.validation import runner
-from triceratops.validation.runner import ApertureConfig, FppRunConfig, run_tess_fpp
+from triceratops.validation.runner import (
+    ApertureConfig,
+    AutoFppComputeConfig,
+    AutoFppPrepareConfig,
+    FppRunConfig,
+    compute_auto_fpp,
+    prepare_auto_fpp,
+    run_tess_fpp,
+)
 
 
 def _field() -> StellarField:
@@ -54,7 +63,7 @@ def _lc_result() -> LightCurvePreparationResult:
 
 
 class StubWorkspace:
-    last_instance: "StubWorkspace | None" = None
+    instances: list["StubWorkspace"] = []
 
     def __init__(
         self,
@@ -75,7 +84,9 @@ class StubWorkspace:
         self.field = _field()
         self.calc_depths_args = None
         self.compute_probs_args = None
-        StubWorkspace.last_instance = self
+        self.compute_prepared_args = None
+        self.prepare_args = None
+        StubWorkspace.instances.append(self)
 
     def fetch_catalog(self) -> StellarField:
         return self.field
@@ -111,8 +122,36 @@ class StubWorkspace:
             scenario_results=[],
         )
 
+    def prepare(
+        self,
+        light_curve: LightCurve,
+        period_days: float,
+        scenario_ids: list[ScenarioID] | None = None,
+    ):
+        self.prepare_args = (light_curve, period_days, scenario_ids)
+        from triceratops.validation.job import PreparedValidationInputs
+
+        return PreparedValidationInputs(
+            target_id=self.tic_id,
+            stellar_field=self.field,
+            light_curve=light_curve,
+            config=Config(),
+            period_days=period_days,
+            scenario_ids=scenario_ids,
+        )
+
+    def compute_prepared(self, prepared):
+        self.compute_prepared_args = prepared
+        return ValidationResult(
+            target_id=self.tic_id,
+            false_positive_probability=0.12,
+            nearby_false_positive_probability=0.03,
+            scenario_results=[],
+        )
+
 
 def test_run_tess_fpp_orchestrates_end_to_end(monkeypatch) -> None:
+    StubWorkspace.instances.clear()
     monkeypatch.setattr(runner, "ValidationWorkspace", StubWorkspace)
     monkeypatch.setattr(
         runner,
@@ -152,20 +191,27 @@ def test_run_tess_fpp_orchestrates_end_to_end(monkeypatch) -> None:
     )
     result = run_tess_fpp("TOI-123.01", config=cfg)
 
-    workspace = StubWorkspace.last_instance
-    assert workspace is not None
-    assert workspace.tic_id == 12345
-    assert workspace.sectors.tolist() == [14, 15]
-    assert workspace.search_radius == 12
-    assert workspace._resolved_target == result.resolved_target
-    assert workspace.calc_depths_args is not None
-    assert workspace.calc_depths_args[0] == pytest.approx(0.0025)
-    assert workspace.calc_depths_args[1] == pixel_coords
-    assert workspace.calc_depths_args[2] == aperture_pixels
-    assert workspace.calc_depths_args[3] == pytest.approx(0.5)
-    assert workspace.compute_probs_args is not None
-    assert workspace.compute_probs_args[1] == pytest.approx(5.0)
-    assert workspace.compute_probs_args[2] == [ScenarioID.TP, ScenarioID.PTP]
+    assert len(StubWorkspace.instances) == 2
+    prep_workspace, compute_workspace = StubWorkspace.instances
+
+    assert prep_workspace.tic_id == 12345
+    assert prep_workspace.sectors.tolist() == [14, 15]
+    assert prep_workspace.search_radius == 12
+    assert prep_workspace._resolved_target == result.resolved_target
+    assert prep_workspace.calc_depths_args is not None
+    assert prep_workspace.calc_depths_args[0] == pytest.approx(0.0025)
+    assert prep_workspace.calc_depths_args[1] == pixel_coords
+    assert prep_workspace.calc_depths_args[2] == aperture_pixels
+    assert prep_workspace.calc_depths_args[3] == pytest.approx(0.5)
+
+    assert compute_workspace.tic_id == 12345
+    assert compute_workspace._resolved_target == result.resolved_target
+    assert compute_workspace.compute_prepared_args is not None
+    assert compute_workspace.compute_prepared_args.period_days == pytest.approx(5.0)
+    assert compute_workspace.compute_prepared_args.scenario_ids == [
+        ScenarioID.TP,
+        ScenarioID.PTP,
+    ]
     assert result.validation_result.fpp == pytest.approx(0.12)
     assert result.transit_depth == pytest.approx(0.0025)
 
@@ -180,6 +226,97 @@ def test_run_tess_fpp_requires_manual_inputs_for_tic() -> None:
             config=FppRunConfig(),
             ephemeris=Ephemeris(period_days=5.0, t0_btjd=1000.0),
         )
+
+
+def test_prepare_auto_fpp_materializes_trilegal_when_requested(monkeypatch) -> None:
+    StubWorkspace.instances.clear()
+    monkeypatch.setattr(runner, "ValidationWorkspace", StubWorkspace)
+    monkeypatch.setattr(
+        runner,
+        "resolve_toi_to_tic_ephemeris_depth",
+        lambda target, cache_ttl_seconds, disk_cache_dir: ToiResolutionResult(
+            status=LookupStatus.OK,
+            toi_query=str(target),
+            tic_id=12345,
+            matched_toi="123.01",
+            period_days=5.0,
+            t0_btjd=1000.0,
+            duration_hours=2.0,
+            depth_ppm=2500.0,
+        ),
+    )
+    monkeypatch.setattr(
+        runner,
+        "_prepare_tpf_lightcurve",
+        lambda target, config: runner._PreparedApertureLightCurve(
+            light_curve_result=_lc_result(),
+            aperture_masks=(np.array([[True, False], [False, True]]),),
+            tpfs=("fake",),
+        ),
+    )
+    monkeypatch.setattr(
+        runner,
+        "_derive_sector_geometry",
+        lambda tpfs, masks, field, search_radius_px: (
+            [np.array([[0.0, 0.0]])],
+            [np.array([[0.0, 0.0], [1.0, 1.0]])],
+        ),
+    )
+
+    artifact = prepare_auto_fpp(
+        "TOI-123.01",
+        config=AutoFppPrepareConfig(materialize_trilegal=True),
+    )
+
+    assert artifact.resolved_target.tic_id == 12345
+    assert StubWorkspace.instances[0].prepare_args is not None
+
+
+def test_compute_auto_fpp_uses_provider_free_path_when_artifact_is_compute_ready(monkeypatch) -> None:
+    StubWorkspace.instances.clear()
+    monkeypatch.setattr(runner, "ValidationWorkspace", StubWorkspace)
+
+    artifact = runner.make_prepared_artifact(
+        resolved_target=runner.ResolvedTarget(
+            target_ref="TOI-123.01",
+            tic_id=12345,
+            ephemeris=runner.Ephemeris(period_days=5.0, t0_btjd=1000.0),
+            source="test",
+        ),
+        light_curve_result=_lc_result(),
+        stellar_field=_field(),
+        transit_depth=0.001,
+        aperture_mode="default",
+        aperture_threshold_sigma=3.0,
+        custom_aperture_pixels=(),
+        bin_count=100,
+        search_radius_px=10,
+        sigma_psf_px=0.75,
+        lightcurve_config=runner.LightCurveConfig(),
+        trilegal_population=TRILEGALResult(
+            tmags=np.array([10.0]),
+            masses=np.array([1.0]),
+            loggs=np.array([4.4]),
+            teffs=np.array([5500.0]),
+            metallicities=np.array([0.0]),
+            jmags=np.array([9.0]),
+            hmags=np.array([8.9]),
+            kmags=np.array([8.8]),
+            gmags=np.array([10.1]),
+            rmags=np.array([10.0]),
+            imags=np.array([9.9]),
+            zmags=np.array([9.8]),
+        ),
+    )
+
+    result = compute_auto_fpp(
+        artifact,
+        config=AutoFppComputeConfig(scenario_ids=(ScenarioID.TP,)),
+    )
+
+    assert result.fpp == pytest.approx(0.12)
+    assert StubWorkspace.instances[0].prepare_args is None
+    assert StubWorkspace.instances[0].compute_prepared_args is not None
 
 
 class FakeTpf:
