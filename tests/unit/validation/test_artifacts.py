@@ -256,6 +256,32 @@ def test_make_prepared_artifact_without_trilegal_is_not_compute_ready() -> None:
     assert artifact.artifact_capabilities.contains_trilegal_population is False
 
 
+def test_prepared_artifact_round_trips_extra_files() -> None:
+    artifact = make_prepared_artifact(
+        resolved_target=ResolvedTarget(
+            target_ref="TIC 12345",
+            tic_id=12345,
+            ephemeris=Ephemeris(period_days=5.0, t0_btjd=1000.0),
+            source="manual",
+        ),
+        light_curve_result=_light_curve_result(),
+        stellar_field=_stellar_field(),
+        transit_depth=0.001,
+        aperture_mode="default",
+        aperture_threshold_sigma=3.0,
+        custom_aperture_pixels=(),
+        bin_count=None,
+        search_radius_px=10,
+        sigma_psf_px=0.75,
+        lightcurve_config=LightCurveConfig(),
+        extra_files={"contrast_curve_summary.json": b"{\"source\":\"exofop\"}"},
+    )
+
+    loaded = PreparedAutoFppArtifact.from_bundle(artifact.to_bundle())
+
+    assert loaded.extra_files["contrast_curve_summary.json"] == b"{\"source\":\"exofop\"}"
+
+
 def test_prepared_artifact_round_trips_contrast_curve() -> None:
     contrast_curve = ContrastCurve(
         separations_arcsec=np.array([0.2, 0.5, 1.0]),
