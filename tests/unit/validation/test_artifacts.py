@@ -20,6 +20,7 @@ from auto_fpp.artifacts import (
     SectorApertureSelection,
     default_artifact_capabilities,
     make_prepared_artifact,
+    mark_artifact_upload_failed,
     mark_artifact_uploaded,
 )
 from auto_fpp.models import RepeatMetricSummary, ValidationRepeatSummary
@@ -505,6 +506,44 @@ def test_mark_artifact_uploaded_records_store_stage() -> None:
     assert store_stage.outputs["locator"] == "r2://science/prepared/tic-12345"
     assert store_stage.outputs["uploaded_stage"] == "field"
     assert uploaded.history[-1].stage == "store_upload"
+
+
+def test_mark_artifact_upload_failed_records_store_stage_error() -> None:
+    artifact = make_prepared_artifact(
+        resolved_target=ResolvedTarget(
+            target_ref="TIC 12345",
+            tic_id=12345,
+            ephemeris=Ephemeris(period_days=5.0, t0_btjd=1000.0),
+            source="manual",
+        ),
+        light_curve_result=_light_curve_result(),
+        stellar_field=_stellar_field(),
+        transit_depth=0.001,
+        aperture_mode="default",
+        aperture_threshold_sigma=3.0,
+        custom_aperture_pixels=(),
+        bin_count=None,
+        search_radius_px=10,
+        sigma_psf_px=0.75,
+        lightcurve_config=LightCurveConfig(),
+    )
+
+    failed = mark_artifact_upload_failed(
+        artifact,
+        locator="/tmp/.auto-fpp-spool/tic-12345",
+        key="tic-12345",
+        store_kind="filesystem",
+        uploaded_stage="trilegal",
+        error_type="TimeoutError",
+        error_message="upload timed out",
+    )
+
+    store_stage = next(stage for stage in failed.stages if stage.name == "store_upload")
+    assert store_stage.status == "failed"
+    assert store_stage.outputs["locator"] == "/tmp/.auto-fpp-spool/tic-12345"
+    assert store_stage.error is not None
+    assert store_stage.error.type == "TimeoutError"
+    assert failed.history[-1].event == "failed"
 
 
 def test_manifest_includes_sector_aperture_overrides() -> None:

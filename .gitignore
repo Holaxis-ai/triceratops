@@ -15,3 +15,4 @@ working_docs/
 .auto-fpp.toml
 .auto-fpp.*.toml
 !.auto-fpp.example.toml
+.auto-fpp-spool/
