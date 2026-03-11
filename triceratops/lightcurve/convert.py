@@ -8,15 +8,16 @@ import numpy as np
 from triceratops.domain.entities import LightCurve
 from triceratops.lightcurve.config import LightCurveConfig
 from triceratops.lightcurve.errors import LightCurveEmptyError, LightCurvePreparationError
+
+if TYPE_CHECKING:
+    import lightkurve
+
 _CADENCE_DAYS: dict[str, float] = {
     "20sec": 20 / 86400,
     "2min": 120 / 86400,
     "10min": 600 / 86400,
     "30min": 1800 / 86400,
 }
-
-if TYPE_CHECKING:
-    import lightkurve
 
 
 def convert_folded_to_domain(

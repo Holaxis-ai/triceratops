@@ -61,10 +61,33 @@ class LightkurveSource:
         ephemeris: Ephemeris,
         config: LightCurveConfig | None = None,
     ) -> LightCurvePreparationResult:
-        """Download from MAST, process with lightkurve, return a domain LightCurve.
+        """Download from MAST, process with lightkurve, return a domain LightCurve."""
+        config = config or LightCurveConfig()
+        lc_folded, sectors, cadence_used = self.prepare_folded(ephemeris, config)
+        lc_domain = convert_folded_to_domain(lc_folded, cadence=cadence_used, config=config)
+
+        return LightCurvePreparationResult(
+            light_curve=lc_domain,
+            ephemeris=ephemeris,
+            sectors_used=sectors,
+            cadence_used=cadence_used,
+            warnings=[],
+        )
+
+    def prepare_folded(
+        self,
+        ephemeris: Ephemeris,
+        config: LightCurveConfig | None = None,
+    ) -> tuple[Any, tuple[int, ...], str]:
+        """Download from MAST and return a folded, trimmed lightkurve object.
 
         Uses lightkurve for: stitch, remove_outliers (upper-only), flatten, fold.
         Does NOT reimplement any photometry processing.
+
+        Returns the folded, trimmed lightkurve object plus source metadata.
+        This lower-level API exists so orchestration code can apply
+        lightkurve-native transforms, such as optional binning, before
+        converting into the domain LightCurve type.
         """
         import astropy.time
         import lightkurve as lk
@@ -127,15 +150,7 @@ class LightkurveSource:
         # Step 7: Convert to domain type
         sectors = self._extract_sectors(lc_coll, lc)
         cadence_used = self._resolve_cadence(lc, config.cadence)
-        lc_domain = convert_folded_to_domain(lc_trimmed, cadence=cadence_used, config=config)
-
-        return LightCurvePreparationResult(
-            light_curve=lc_domain,
-            ephemeris=ephemeris,
-            sectors_used=sectors,
-            cadence_used=cadence_used,
-            warnings=[],
-        )
+        return lc_trimmed, sectors, cadence_used
 
     def _search_and_download(self, config: LightCurveConfig, lk: Any) -> Any:
         search_kwargs: dict[str, Any] = {

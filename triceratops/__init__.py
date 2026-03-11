@@ -5,13 +5,23 @@ __version__ = "0.2.0.dev0"
 
 from triceratops.config.config import Config, MissionConfig
 from triceratops.domain.scenario_id import ScenarioID
-from triceratops.validation.engine import ValidationEngine
-from triceratops.validation.workspace import ValidationWorkspace
+from triceratops.validation import (
+    ApertureConfig,
+    FppRunConfig,
+    FppRunResult,
+    ValidationEngine,
+    ValidationWorkspace,
+    run_tess_fpp,
+)
 
 __all__ = [
     "__version__",
     "ValidationWorkspace",
     "ValidationEngine",
+    "ApertureConfig",
+    "FppRunConfig",
+    "FppRunResult",
+    "run_tess_fpp",
     "Config",
     "MissionConfig",
     "ScenarioID",
