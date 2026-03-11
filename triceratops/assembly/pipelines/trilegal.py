@@ -1,6 +1,7 @@
 """TRILEGAL population assembly: provider query with optional cache."""
 from __future__ import annotations
 
+import inspect
 from collections.abc import Callable
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -32,13 +33,16 @@ def assemble_trilegal(
     target = stellar_field.target
 
     try:
-        result = population_provider.query(
-            ra_deg=target.ra_deg,
-            dec_deg=target.dec_deg,
-            target_tmag=target.tmag,
-            cache_path=cache,
-            status_callback=status_callback,
-        )
+        query_params = inspect.signature(population_provider.query).parameters
+        query_kwargs = {
+            "ra_deg": target.ra_deg,
+            "dec_deg": target.dec_deg,
+            "target_tmag": target.tmag,
+            "cache_path": cache,
+        }
+        if "status_callback" in query_params:
+            query_kwargs["status_callback"] = status_callback
+        result = population_provider.query(**query_kwargs)
     except Exception as exc:
         raise TRILEGALAcquisitionError(
             f"TRILEGAL query failed: {exc}"
