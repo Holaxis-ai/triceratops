@@ -3,9 +3,12 @@ from __future__ import annotations
 
 import io
 import subprocess
+import sys
 from pathlib import Path
+from types import SimpleNamespace
 
 import numpy as np
+import pytest
 
 from auto_fpp.artifacts import make_prepared_artifact
 from auto_fpp.outputs import with_preparation_outputs
@@ -17,7 +20,7 @@ from auto_fpp.store import (
     default_artifact_key,
 )
 from triceratops.domain.entities import LightCurve, Star, StellarField
-from triceratops.domain.value_objects import StellarParameters
+from triceratops.domain.value_objects import ContrastCurve, StellarParameters
 from triceratops.lightcurve.config import LightCurveConfig
 from triceratops.lightcurve.ephemeris import Ephemeris, ResolvedTarget
 from triceratops.lightcurve.result import LightCurvePreparationResult
@@ -187,6 +190,87 @@ def test_r2_store_rejects_non_r2_ref() -> None:
         assert "store_kind='filesystem'" in str(exc)
     else:  # pragma: no cover
         raise AssertionError("Expected ValueError for non-R2 ref")
+
+
+def test_r2_store_round_trips_contrast_curve_payload() -> None:
+    artifact = make_prepared_artifact(
+        resolved_target=_artifact().resolved_target,
+        light_curve_result=_artifact().light_curve_result,
+        stellar_field=_artifact().stellar_field,
+        transit_depth=0.001,
+        aperture_mode="default",
+        aperture_threshold_sigma=3.0,
+        custom_aperture_pixels=(),
+        bin_count=100,
+        search_radius_px=10,
+        sigma_psf_px=0.75,
+        lightcurve_config=LightCurveConfig(),
+        contrast_curve=ContrastCurve(
+            separations_arcsec=np.array([0.5, 1.0]),
+            delta_mags=np.array([4.0, 6.0]),
+            band="TESS",
+        ),
+    )
+    client = _FakeR2Client()
+    store = R2PreparedArtifactStore(
+        bucket="science-artifacts",
+        key_prefix="prepared",
+        client=client,
+    )
+
+    ref = store.put(artifact, key="tic-12345")
+    loaded = store.get(ref)
+
+    assert loaded.contrast_curve is not None
+    np.testing.assert_allclose(
+        loaded.contrast_curve.separations_arcsec,
+        artifact.contrast_curve.separations_arcsec,
+    )
+    np.testing.assert_allclose(
+        loaded.contrast_curve.delta_mags,
+        artifact.contrast_curve.delta_mags,
+    )
+
+
+def test_r2_store_build_client_uses_cloudflare_env(monkeypatch) -> None:
+    seen: dict[str, object] = {}
+
+    def _fake_client(**kwargs):
+        seen.update(kwargs)
+        return object()
+
+    monkeypatch.setenv("CLOUDFLARE_R2_ACCOUNT_ID", "acct-123")
+    monkeypatch.setenv("CLOUDFLARE_R2_ACCESS_KEY_ID", "access-123")
+    monkeypatch.setenv("CLOUDFLARE_R2_SECRET_ACCESS_KEY", "secret-123")
+    monkeypatch.setitem(
+        sys.modules,
+        "boto3",
+        SimpleNamespace(client=_fake_client),
+    )
+
+    store = R2PreparedArtifactStore(bucket="science-artifacts")
+
+    assert store.bucket == "science-artifacts"
+    assert seen["service_name"] == "s3"
+    assert seen["region_name"] == "auto"
+    assert seen["endpoint_url"] == "https://acct-123.r2.cloudflarestorage.com"
+    assert seen["aws_access_key_id"] == "access-123"
+    assert seen["aws_secret_access_key"] == "secret-123"
+
+
+def test_r2_store_build_client_rejects_partial_credentials(monkeypatch) -> None:
+    monkeypatch.setenv("CLOUDFLARE_R2_ACCOUNT_ID", "acct-123")
+    monkeypatch.setenv("CLOUDFLARE_R2_ACCESS_KEY_ID", "access-123")
+    monkeypatch.delenv("CLOUDFLARE_R2_SECRET_ACCESS_KEY", raising=False)
+    monkeypatch.delenv("AWS_SECRET_ACCESS_KEY", raising=False)
+    monkeypatch.setitem(
+        sys.modules,
+        "boto3",
+        SimpleNamespace(client=lambda **kwargs: object()),
+    )
+
+    with pytest.raises(ValueError, match="requires both access_key_id and secret_access_key"):
+        R2PreparedArtifactStore(bucket="science-artifacts")
 
 
 class _FakeWranglerRunner:
