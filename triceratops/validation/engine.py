@@ -19,13 +19,19 @@ from dataclasses import dataclass, field
 import numpy as np
 
 from triceratops.config.config import Config
+from triceratops.domain.entities import (
+    ExternalLightCurve,
+    LightCurve,
+    Star,
+    StellarField,
+)
 from triceratops.domain.molusc import MoluscData
-from triceratops.domain.entities import ExternalLightCurve, LightCurve, Star, StellarField
 from triceratops.domain.result import ScenarioResult, ValidationResult
 from triceratops.domain.scenario_id import ScenarioID
 from triceratops.domain.value_objects import ContrastCurve, StellarParameters
 from triceratops.population.protocols import TRILEGALResult
 from triceratops.scenarios.base import Scenario
+from triceratops.scenarios.nearby_scenarios import EmptyTrilegalPeerPopulationError
 from triceratops.scenarios.registry import DEFAULT_REGISTRY, ScenarioRegistry
 from triceratops.validation.job import PreparedValidationInputs
 
@@ -55,6 +61,14 @@ class ScenarioExecutionContext:
     molusc_data: MoluscData | None = None
 
 
+@dataclass
+class ScenarioExecutionOutcome:
+    """Normalized result of one scenario worker execution."""
+
+    results: tuple[ScenarioResult, ...]
+    warnings: tuple[str, ...] = ()
+
+
 def _worker_initializer() -> None:
     """Limit BLAS/OMP threads to 1 per worker process.
 
@@ -76,7 +90,7 @@ def _worker_initializer() -> None:
 
 def _scenario_worker(
     ctx: ScenarioExecutionContext,
-) -> ScenarioResult | tuple[ScenarioResult, ScenarioResult]:
+) -> ScenarioExecutionOutcome:
     """Top-level worker function for ProcessPoolExecutor.
 
     Must be module-level (not a closure or lambda) to be picklable under
@@ -95,13 +109,54 @@ def _scenario_worker(
         "target_tmag": ctx.target_tmag,
         "target_id": ctx.target_id,
     }
-    return ctx.scenario.compute(
-        light_curve=ctx.light_curve,
-        stellar_params=ctx.stellar_params,
-        period_days=ctx.period_days,
-        config=ctx.config,
-        external_lcs=ctx.external_lcs if ctx.external_lcs else None,
-        **kwargs,
+    try:
+        result_or_tuple = ctx.scenario.compute(
+            light_curve=ctx.light_curve,
+            stellar_params=ctx.stellar_params,
+            period_days=ctx.period_days,
+            config=ctx.config,
+            external_lcs=ctx.external_lcs if ctx.external_lcs else None,
+            **kwargs,
+        )
+    except EmptyTrilegalPeerPopulationError as exc:
+        warning = (
+            f"{ctx.scenario.scenario_id.value}: {exc}. "
+            "Returning lnZ=-inf for this nearby scenario."
+        )
+        results = [_empty_scenario_result(exc.scenario_id, ctx.target_id)]
+        if exc.returns_twin:
+            results.append(_empty_scenario_result(ScenarioID.NEBX2P, ctx.target_id))
+        return ScenarioExecutionOutcome(results=tuple(results), warnings=(warning,))
+    if isinstance(result_or_tuple, tuple):
+        return ScenarioExecutionOutcome(results=result_or_tuple)
+    return ScenarioExecutionOutcome(results=(result_or_tuple,))
+
+
+def _empty_scenario_result(
+    scenario_id: ScenarioID,
+    target_id: int,
+) -> ScenarioResult:
+    zeros = np.zeros(1, dtype=float)
+    return ScenarioResult(
+        scenario_id=scenario_id,
+        host_star_tic_id=target_id,
+        ln_evidence=float("-inf"),
+        host_mass_msun=zeros.copy(),
+        host_radius_rsun=zeros.copy(),
+        host_u1=zeros.copy(),
+        host_u2=zeros.copy(),
+        period_days=zeros.copy(),
+        inclination_deg=zeros.copy(),
+        impact_parameter=zeros.copy(),
+        eccentricity=zeros.copy(),
+        arg_periastron_deg=zeros.copy(),
+        planet_radius_rearth=zeros.copy(),
+        eb_mass_msun=zeros.copy(),
+        eb_radius_rsun=zeros.copy(),
+        flux_ratio_eb_tess=zeros.copy(),
+        companion_mass_msun=zeros.copy(),
+        companion_radius_rsun=zeros.copy(),
+        flux_ratio_companion_tess=zeros.copy(),
     )
 
 
@@ -226,29 +281,29 @@ class ValidationEngine:
         ]
 
         all_results: list[ScenarioResult] = []
+        all_warnings: list[str] = []
         if config.n_workers == 0:
             for task in tasks:
-                result_or_tuple = _scenario_worker(task)
-                if isinstance(result_or_tuple, tuple):
-                    all_results.extend(result_or_tuple)
-                else:
-                    all_results.append(result_or_tuple)
+                outcome = _scenario_worker(task)
+                all_results.extend(outcome.results)
+                all_warnings.extend(outcome.warnings)
         else:
             n_workers = (
                 min(len(tasks), os.cpu_count() or 1)
                 if config.n_workers < 0
                 else min(config.n_workers, len(tasks))
             )
-            with ProcessPoolExecutor(max_workers=n_workers, initializer=_worker_initializer) as pool:
+            with ProcessPoolExecutor(
+                max_workers=n_workers,
+                initializer=_worker_initializer,
+            ) as pool:
                 futures = [pool.submit(_scenario_worker, task) for task in tasks]
                 for future in futures:
-                    result_or_tuple = future.result()
-                    if isinstance(result_or_tuple, tuple):
-                        all_results.extend(result_or_tuple)
-                    else:
-                        all_results.append(result_or_tuple)
+                    outcome = future.result()
+                    all_results.extend(outcome.results)
+                    all_warnings.extend(outcome.warnings)
 
-        return self._aggregate(all_results, stellar_field.target_id)
+        return self._aggregate(all_results, stellar_field.target_id, warnings=all_warnings)
 
     def compute_prepared(self, prepared: PreparedValidationInputs) -> ValidationResult:
         """Provider-free compute entrypoint.
@@ -314,7 +369,8 @@ class ValidationEngine:
             missing = [s.scenario_id for s in active if s.scenario_id in trilegal_ids]
             if missing:
                 raise PreparedInputIncompleteError(
-                    f"trilegal_population is required for scenarios {missing} but was not provided. "
+                    f"trilegal_population is required for scenarios {missing} "
+                    "but was not provided. "
                     "Pass a population_provider to ValidationPreparer or ValidationWorkspace, "
                     "or exclude TRILEGAL-dependent scenarios via scenario_ids."
                 )
@@ -364,13 +420,15 @@ class ValidationEngine:
     def _aggregate(
         results: list[ScenarioResult],
         target_id: int,
+        warnings: list[str] | None = None,
     ) -> ValidationResult:
-        return _aggregate(results, target_id)
+        return _aggregate(results, target_id, warnings=warnings)
 
 
 def _aggregate(
     results: list[ScenarioResult],
     target_id: int,
+    warnings: list[str] | None = None,
 ) -> ValidationResult:
     """Compute relative probabilities, FPP, and NFPP.
 
@@ -383,6 +441,7 @@ def _aggregate(
             false_positive_probability=1.0,
             nearby_false_positive_probability=0.0,
             scenario_results=[],
+            warnings=[] if warnings is None else list(warnings),
         )
 
     lnZ_vals = np.array([r.ln_evidence for r in results])
@@ -419,4 +478,5 @@ def _aggregate(
         false_positive_probability=fpp,
         nearby_false_positive_probability=nfpp,
         scenario_results=results,
+        warnings=[] if warnings is None else list(warnings),
     )

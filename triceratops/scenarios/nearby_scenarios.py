@@ -62,6 +62,25 @@ _relations = StellarRelations()
 _EVOLVED_LOGG: float = 3.0
 
 
+class EmptyTrilegalPeerPopulationError(ValueError):
+    """Raised when nearby-unknown scenarios have no TRILEGAL peers to sample."""
+
+    def __init__(
+        self,
+        *,
+        scenario_id: ScenarioID,
+        returns_twin: bool,
+        target_tmag: float,
+    ) -> None:
+        self.scenario_id = scenario_id
+        self.returns_twin = returns_twin
+        self.target_tmag = target_tmag
+        super().__init__(
+            f"No TRILEGAL stars found with Tmag in "
+            f"[{target_tmag - 1:.1f}, {target_tmag + 1:.1f}]"
+        )
+
+
 def _filter_trilegal_by_tmag(
     population: TRILEGALResult,
     target_tmag: float,
@@ -136,9 +155,10 @@ class NTPUnknownScenario(BaseScenario):
         filtered = _filter_trilegal_by_tmag(population, target_tmag)
         n_possible = len(filtered["masses"])
         if n_possible == 0:
-            raise ValueError(
-                f"No TRILEGAL stars found with Tmag in "
-                f"[{target_tmag - 1:.1f}, {target_tmag + 1:.1f}]"
+            raise EmptyTrilegalPeerPopulationError(
+                scenario_id=ScenarioID.NTP,
+                returns_twin=False,
+                target_tmag=target_tmag,
             )
 
         idxs = np.random.randint(0, n_possible, size=n)
@@ -422,9 +442,10 @@ class NEBUnknownScenario(BaseScenario):
         filtered = _filter_trilegal_by_tmag(population, target_tmag)
         n_possible = len(filtered["masses"])
         if n_possible == 0:
-            raise ValueError(
-                f"No TRILEGAL stars found with Tmag in "
-                f"[{target_tmag - 1:.1f}, {target_tmag + 1:.1f}]"
+            raise EmptyTrilegalPeerPopulationError(
+                scenario_id=ScenarioID.NEB,
+                returns_twin=True,
+                target_tmag=target_tmag,
             )
 
         idxs = np.random.randint(0, n_possible, size=n)

@@ -11,6 +11,7 @@ from triceratops.domain.entities import LightCurve, Star, StellarField
 from triceratops.domain.result import ScenarioResult, ValidationResult
 from triceratops.domain.scenario_id import ScenarioID
 from triceratops.domain.value_objects import StellarParameters
+from triceratops.scenarios.nearby_scenarios import EmptyTrilegalPeerPopulationError
 from triceratops.scenarios.registry import ScenarioRegistry
 from triceratops.validation.engine import ValidationEngine
 
@@ -94,6 +95,28 @@ class _RecordingScenario(_FakeScenario):
     ) -> ScenarioResult | tuple[ScenarioResult, ScenarioResult]:
         self.seen_light_curve = light_curve  # type: ignore[assignment]
         return self._result
+
+
+@dataclass
+class _FailingNearbyScenario(_FakeScenario):
+    """Fake nearby scenario that reproduces an empty TRILEGAL peer set."""
+
+    _target_tmag: float = 10.0
+
+    def compute(
+        self,
+        light_curve: object = None,
+        stellar_params: object = None,
+        period_days: object = None,
+        config: object = None,
+        external_lcs: object = None,
+        **kwargs: object,
+    ) -> ScenarioResult | tuple[ScenarioResult, ScenarioResult]:
+        raise EmptyTrilegalPeerPopulationError(
+            scenario_id=self._scenario_id,
+            returns_twin=self.returns_twin,
+            target_tmag=self._target_tmag,
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -568,6 +591,70 @@ class TestEngineCompute:
 
         assert fake_ntp.seen_light_curve is transit_lc
 
+    def test_compute_converts_empty_ntp_peers_into_warning_and_neg_inf_result(
+        self, transit_lc, stellar_field, small_config,
+    ) -> None:
+        registry = ScenarioRegistry()
+        registry.register(
+            _FailingNearbyScenario(
+                ScenarioID.NTP,
+                False,
+                _make_result(ScenarioID.NTP, lnZ=0.0),
+                _target_tmag=stellar_field.target.tmag or 10.0,
+            )
+        )
+
+        engine = ValidationEngine(registry=registry)
+        result = engine.compute(
+            transit_lc,
+            stellar_field,
+            period_days=5.0,
+            config=small_config,
+            scenario_ids=[ScenarioID.NTP],
+        )
+
+        assert [sr.scenario_id for sr in result.scenario_results] == [ScenarioID.NTP]
+        ntp = result.scenario_results[0]
+        assert ntp.ln_evidence == float("-inf")
+        assert ntp.relative_probability == 0.0
+        assert len(result.warnings) == 1
+        assert "NTP" in result.warnings[0]
+        assert "Returning lnZ=-inf" in result.warnings[0]
+
+    def test_parallel_compute_converts_empty_neb_peers_into_placeholder_pair(
+        self, transit_lc, stellar_field,
+    ) -> None:
+        registry = ScenarioRegistry()
+        registry.register(
+            _FailingNearbyScenario(
+                ScenarioID.NEB,
+                True,
+                (
+                    _make_result(ScenarioID.NEB, lnZ=0.0),
+                    _make_result(ScenarioID.NEBX2P, lnZ=0.0),
+                ),
+                _target_tmag=stellar_field.target.tmag or 10.0,
+            )
+        )
+
+        engine = ValidationEngine(registry=registry)
+        result = engine.compute(
+            transit_lc,
+            stellar_field,
+            period_days=5.0,
+            config=Config(n_mc_samples=100, n_best_samples=10, n_workers=1),
+            scenario_ids=[ScenarioID.NEB],
+        )
+
+        assert [sr.scenario_id for sr in result.scenario_results] == [
+            ScenarioID.NEB,
+            ScenarioID.NEBX2P,
+        ]
+        assert all(sr.ln_evidence == float("-inf") for sr in result.scenario_results)
+        assert all(sr.relative_probability == 0.0 for sr in result.scenario_results)
+        assert len(result.warnings) == 1
+        assert "NEB" in result.warnings[0]
+
 
 # ---------------------------------------------------------------------------
 # _renorm_light_curve_for_host edge cases
@@ -830,7 +917,12 @@ class TestEngineProviderFreePhase2:
                 logg=4.5, metallicity_dex=0.0, parallax_mas=8.0,
             ),
         )
-        return StellarField(target_id=55555, mission="TESS", search_radius_pixels=10, stars=[target])
+        return StellarField(
+            target_id=55555,
+            mission="TESS",
+            search_radius_pixels=10,
+            stars=[target],
+        )
 
     @pytest.fixture()
     def lc(self):
@@ -970,7 +1062,7 @@ class TestNWorkersCapAtScenarioCount:
         self, stellar_field, transit_lc,
     ) -> None:
         """Verify ProcessPoolExecutor is called with max_workers <= len(scenarios)."""
-        from unittest.mock import MagicMock, patch
+        from unittest.mock import patch
 
         config = Config(n_mc_samples=50, n_best_samples=5, n_workers=100)
         registry = self._make_registry_with_n_scenarios(3)
