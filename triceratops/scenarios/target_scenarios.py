@@ -179,14 +179,15 @@ class TTPScenario(BaseScenario):
         self, samples: dict[str, np.ndarray], geometry: dict[str, np.ndarray],
         ldc: LimbDarkeningCoeffs, lnZ: float, idx: np.ndarray,
         stellar_params: StellarParameters,
-        external_lcs: list[ExternalLightCurve], twin: bool = False,
+        external_lcs: list[ExternalLightCurve], host_star_tic_id: int,
+        twin: bool = False,
     ) -> ScenarioResult:
         n = len(idx)
         ext_u1 = [np.full(n, float(e.ldc.u1)) for e in external_lcs if e.ldc]
         ext_u2 = [np.full(n, float(e.ldc.u2)) for e in external_lcs if e.ldc]
         return ScenarioResult(
             scenario_id=ScenarioID.TP,
-            host_star_tic_id=0,
+            host_star_tic_id=host_star_tic_id,
             ln_evidence=lnZ,
             host_mass_msun=np.full(n, stellar_params.mass_msun),
             host_radius_rsun=np.full(n, stellar_params.radius_rsun),
@@ -450,7 +451,8 @@ class TEBScenario(BaseScenario):
         self, samples: dict[str, np.ndarray], geometry: dict[str, np.ndarray],
         ldc: LimbDarkeningCoeffs, lnZ: float, idx: np.ndarray,
         stellar_params: StellarParameters,
-        external_lcs: list[ExternalLightCurve], twin: bool = False,
+        external_lcs: list[ExternalLightCurve], host_star_tic_id: int,
+        twin: bool = False,
     ) -> ScenarioResult:
         n = len(idx)
         sid = ScenarioID.EBX2P if twin else ScenarioID.EB
@@ -473,7 +475,7 @@ class TEBScenario(BaseScenario):
 
         return ScenarioResult(
             scenario_id=sid,
-            host_star_tic_id=0,
+            host_star_tic_id=host_star_tic_id,
             ln_evidence=lnZ,
             host_mass_msun=np.full(n, stellar_params.mass_msun),
             host_radius_rsun=np.full(n, stellar_params.radius_rsun),

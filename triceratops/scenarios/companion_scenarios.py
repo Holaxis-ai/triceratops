@@ -284,6 +284,7 @@ class PTPScenario(BaseScenario):
         idx: np.ndarray,
         stellar_params: StellarParameters,
         external_lcs: list[ExternalLightCurve],
+        host_star_tic_id: int,
         twin: bool = False,
     ) -> ScenarioResult:
         """Pack PTP result. Source: marginal_likelihoods.py:886-913."""
@@ -303,7 +304,7 @@ class PTPScenario(BaseScenario):
             )
         return ScenarioResult(
             scenario_id=self.scenario_id,
-            host_star_tic_id=0,
+            host_star_tic_id=host_star_tic_id,
             ln_evidence=lnZ,
             host_mass_msun=np.full(n, stellar_params.mass_msun),
             host_radius_rsun=np.full(n, stellar_params.radius_rsun),
@@ -381,9 +382,10 @@ class PTPScenario(BaseScenario):
         n_best = config.n_best_samples
         # BUG-07 fix: rank by posterior (lnL + lnprior_comp), not raw likelihood
         idx = pack_best_indices(lnL + lnprior_comp, n_best)
+        host_star_tic_id = int(kwargs.get("target_id", 0))
         return self._pack_result(
             samples, geometry, ldc, lnZ, idx, stellar_params,
-            resolved_ext_lcs,
+            resolved_ext_lcs, host_star_tic_id,
         )
 
 
@@ -702,6 +704,7 @@ class PEBScenario(BaseScenario):
         idx: np.ndarray,
         stellar_params: StellarParameters,
         external_lcs: list[ExternalLightCurve],
+        host_star_tic_id: int,
         twin: bool = False,
     ) -> ScenarioResult:
         """Pack PEB result. Source: marginal_likelihoods.py:1230-1278."""
@@ -732,7 +735,7 @@ class PEBScenario(BaseScenario):
 
         return ScenarioResult(
             scenario_id=ScenarioID.PEBX2P if twin else self.scenario_id,
-            host_star_tic_id=0,
+            host_star_tic_id=host_star_tic_id,
             ln_evidence=lnZ,
             host_mass_msun=np.full(n, stellar_params.mass_msun),
             host_radius_rsun=np.full(n, stellar_params.radius_rsun),
@@ -812,16 +815,17 @@ class PEBScenario(BaseScenario):
         n_best = config.n_best_samples
         # BUG-07 fix: rank by posterior (lnL + lnprior_comp), not raw likelihood
         idx = pack_best_indices(lnL + lnprior_comp, n_best)
+        host_star_tic_id = int(kwargs.get("target_id", 0))
         result = self._pack_result(
             samples, geometry, ldc, lnZ, idx, stellar_params,
-            resolved_ext_lcs, twin=False,
+            resolved_ext_lcs, host_star_tic_id, twin=False,
         )
 
         # BUG-07 fix: rank by posterior (lnL + lnprior_comp), not raw likelihood
         idx_twin = pack_best_indices(lnL_twin + lnprior_comp, n_best)
         result_twin = self._pack_result(
             samples, geometry, ldc, lnZ_twin, idx_twin, stellar_params,
-            resolved_ext_lcs, twin=True,
+            resolved_ext_lcs, host_star_tic_id, twin=True,
         )
 
         return result, result_twin
@@ -1070,6 +1074,7 @@ class STPScenario(BaseScenario):
         idx: np.ndarray,
         stellar_params: StellarParameters,
         external_lcs: list[ExternalLightCurve],
+        host_star_tic_id: int,
         twin: bool = False,
     ) -> ScenarioResult:
         """Pack STP result. Host = companion, Comp = target star.
@@ -1104,7 +1109,7 @@ class STPScenario(BaseScenario):
             )
         return ScenarioResult(
             scenario_id=self.scenario_id,
-            host_star_tic_id=0,
+            host_star_tic_id=host_star_tic_id,
             ln_evidence=lnZ,
             host_mass_msun=samples["masses_comp"][idx],
             host_radius_rsun=samples["radii_comp"][idx],
@@ -1178,9 +1183,10 @@ class STPScenario(BaseScenario):
         n_best = config.n_best_samples
         # BUG-07 fix: rank by posterior (lnL + lnprior_comp), not raw likelihood
         idx = pack_best_indices(lnL + lnprior_comp, n_best)
+        host_star_tic_id = int(kwargs.get("target_id", 0))
         return self._pack_result(
             samples, geometry, ldc, lnZ, idx, stellar_params,
-            resolved_ext_lcs,
+            resolved_ext_lcs, host_star_tic_id,
         )
 
 
@@ -1481,6 +1487,7 @@ class SEBScenario(BaseScenario):
         idx: np.ndarray,
         stellar_params: StellarParameters,
         external_lcs: list[ExternalLightCurve],
+        host_star_tic_id: int,
         twin: bool = False,
     ) -> ScenarioResult:
         """Pack SEB result. Host = companion, Comp = target star.
@@ -1527,7 +1534,7 @@ class SEBScenario(BaseScenario):
 
         return ScenarioResult(
             scenario_id=ScenarioID.SEBX2P if twin else self.scenario_id,
-            host_star_tic_id=0,
+            host_star_tic_id=host_star_tic_id,
             ln_evidence=lnZ,
             host_mass_msun=samples["masses_comp"][idx],
             host_radius_rsun=samples["radii_comp"][idx],
@@ -1606,16 +1613,17 @@ class SEBScenario(BaseScenario):
         n_best = config.n_best_samples
         # BUG-07 fix: rank by posterior (lnL + lnprior_comp), not raw likelihood
         idx = pack_best_indices(lnL + lnprior_comp, n_best)
+        host_star_tic_id = int(kwargs.get("target_id", 0))
         result = self._pack_result(
             samples, geometry, ldc, lnZ, idx, stellar_params,
-            resolved_ext_lcs, twin=False,
+            resolved_ext_lcs, host_star_tic_id, twin=False,
         )
 
         # BUG-07 fix: rank by posterior (lnL + lnprior_comp), not raw likelihood
         idx_twin = pack_best_indices(lnL_twin + lnprior_comp, n_best)
         result_twin = self._pack_result(
             samples, geometry, ldc, lnZ_twin, idx_twin, stellar_params,
-            resolved_ext_lcs, twin=True,
+            resolved_ext_lcs, host_star_tic_id, twin=True,
         )
 
         return result, result_twin

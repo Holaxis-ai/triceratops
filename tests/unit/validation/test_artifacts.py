@@ -16,7 +16,7 @@ from auto_fpp.outputs import with_compute_outputs, with_preparation_outputs
 from triceratops.domain.entities import LightCurve, Star, StellarField
 from triceratops.domain.result import ScenarioResult, ValidationResult
 from triceratops.domain.scenario_id import ScenarioID
-from triceratops.domain.value_objects import StellarParameters
+from triceratops.domain.value_objects import ContrastCurve, StellarParameters
 from triceratops.lightcurve.config import LightCurveConfig
 from triceratops.lightcurve.ephemeris import Ephemeris, ResolvedTarget
 from triceratops.lightcurve.result import LightCurvePreparationResult
@@ -254,6 +254,47 @@ def test_make_prepared_artifact_without_trilegal_is_not_compute_ready() -> None:
 
     assert artifact.artifact_kind == ARTIFACT_KIND_PREPARED
     assert artifact.artifact_capabilities.contains_trilegal_population is False
+
+
+def test_prepared_artifact_round_trips_contrast_curve() -> None:
+    contrast_curve = ContrastCurve(
+        separations_arcsec=np.array([0.2, 0.5, 1.0]),
+        delta_mags=np.array([2.0, 4.0, 6.0]),
+        band="J",
+    )
+    artifact = make_prepared_artifact(
+        resolved_target=ResolvedTarget(
+            target_ref="TIC 12345",
+            tic_id=12345,
+            ephemeris=Ephemeris(period_days=5.0, t0_btjd=1000.0),
+            source="manual",
+        ),
+        light_curve_result=_light_curve_result(),
+        stellar_field=_stellar_field(),
+        transit_depth=0.001,
+        aperture_mode="default",
+        aperture_threshold_sigma=3.0,
+        custom_aperture_pixels=(),
+        bin_count=100,
+        search_radius_px=10,
+        sigma_psf_px=0.75,
+        lightcurve_config=LightCurveConfig(),
+        trilegal_population=_trilegal(),
+        contrast_curve=contrast_curve,
+    )
+
+    loaded = PreparedAutoFppArtifact.from_bundle(artifact.to_bundle())
+
+    assert loaded.contrast_curve is not None
+    assert loaded.contrast_curve.band == "J"
+    np.testing.assert_allclose(
+        loaded.contrast_curve.separations_arcsec,
+        contrast_curve.separations_arcsec,
+    )
+    np.testing.assert_allclose(
+        loaded.contrast_curve.delta_mags,
+        contrast_curve.delta_mags,
+    )
 
 
 def test_preparation_outputs_are_added_and_round_trip() -> None:

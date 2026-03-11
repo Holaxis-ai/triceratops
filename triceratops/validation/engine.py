@@ -19,11 +19,11 @@ from dataclasses import dataclass, field
 import numpy as np
 
 from triceratops.config.config import Config
+from triceratops.domain.molusc import MoluscData
 from triceratops.domain.entities import ExternalLightCurve, LightCurve, Star, StellarField
 from triceratops.domain.result import ScenarioResult, ValidationResult
 from triceratops.domain.scenario_id import ScenarioID
 from triceratops.domain.value_objects import ContrastCurve, StellarParameters
-from triceratops.domain.molusc import MoluscData
 from triceratops.population.protocols import TRILEGALResult
 from triceratops.scenarios.base import Scenario
 from triceratops.scenarios.registry import DEFAULT_REGISTRY, ScenarioRegistry
@@ -49,6 +49,7 @@ class ScenarioExecutionContext:
     trilegal_population: TRILEGALResult | None = None
     host_magnitudes: dict = field(default_factory=dict)
     target_tmag: float | None = None
+    target_id: int = 0
     external_lc_bands: tuple = ()
     filt: str | None = None
     molusc_data: MoluscData | None = None
@@ -92,6 +93,7 @@ def _scenario_worker(
         "host_magnitudes": ctx.host_magnitudes,
         "external_lc_bands": ctx.external_lc_bands,
         "target_tmag": ctx.target_tmag,
+        "target_id": ctx.target_id,
     }
     return ctx.scenario.compute(
         light_curve=ctx.light_curve,
@@ -194,6 +196,7 @@ class ValidationEngine:
 
         filt = contrast_curve.band if contrast_curve is not None else None
         shared_kwargs: dict = {
+            "target_id": stellar_field.target_id,
             "contrast_curve": contrast_curve,
             "filt": filt,
             "molusc_data": molusc_data,

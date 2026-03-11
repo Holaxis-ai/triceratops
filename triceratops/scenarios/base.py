@@ -148,16 +148,17 @@ class BaseScenario(ABC):
         # Phase 9: Pack results from top n_best draws
         n_best = config.n_best_samples
         idx = pack_best_indices(lnL, n_best)
+        host_star_tic_id = int(kwargs.get("target_id", 0))
         result = self._pack_result(
             samples, geometry, ldc, lnZ, idx, stellar_params,
-            resolved_ext_lcs, twin=False
+            resolved_ext_lcs, host_star_tic_id=host_star_tic_id, twin=False
         )
 
         if self.returns_twin and lnZ_twin is not None and lnL_twin is not None:
             idx_twin = pack_best_indices(lnL_twin, n_best)
             result_twin = self._pack_result(
                 samples, geometry, ldc, lnZ_twin, idx_twin, stellar_params,
-                resolved_ext_lcs, twin=True
+                resolved_ext_lcs, host_star_tic_id=host_star_tic_id, twin=True
             )
             return result, result_twin
 
@@ -270,6 +271,7 @@ class BaseScenario(ABC):
         idx: np.ndarray,
         stellar_params: StellarParameters,
         external_lcs: list[ExternalLightCurve],
+        host_star_tic_id: int,
         twin: bool = False,
     ) -> ScenarioResult:
         """Build a ScenarioResult from the top-n_best draws."""

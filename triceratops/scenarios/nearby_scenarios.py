@@ -248,7 +248,8 @@ class NTPUnknownScenario(BaseScenario):
         self, samples: dict[str, np.ndarray], geometry: dict[str, np.ndarray],
         ldc: LimbDarkeningCoeffs, lnZ: float, idx: np.ndarray,
         stellar_params: StellarParameters,
-        external_lcs: list[ExternalLightCurve], twin: bool = False,
+        external_lcs: list[ExternalLightCurve], host_star_tic_id: int,
+        twin: bool = False,
     ) -> ScenarioResult:
         """Source: marginal_likelihoods.py:3844-3861"""
         n = len(idx)
@@ -256,7 +257,7 @@ class NTPUnknownScenario(BaseScenario):
 
         return ScenarioResult(
             scenario_id=ScenarioID.NTP,
-            host_star_tic_id=0,
+            host_star_tic_id=host_star_tic_id,
             ln_evidence=lnZ,
             host_mass_msun=samples["masses_possible"][idxs[idx]],
             host_radius_rsun=samples["radii_possible"][idxs[idx]],
@@ -537,7 +538,8 @@ class NEBUnknownScenario(BaseScenario):
         self, samples: dict[str, np.ndarray], geometry: dict[str, np.ndarray],
         ldc: LimbDarkeningCoeffs, lnZ: float, idx: np.ndarray,
         stellar_params: StellarParameters,
-        external_lcs: list[ExternalLightCurve], twin: bool = False,
+        external_lcs: list[ExternalLightCurve], host_star_tic_id: int,
+        twin: bool = False,
     ) -> ScenarioResult:
         """Source: marginal_likelihoods.py:4104-4145"""
         n = len(idx)
@@ -548,7 +550,7 @@ class NEBUnknownScenario(BaseScenario):
 
         return ScenarioResult(
             scenario_id=sid,
-            host_star_tic_id=0,
+            host_star_tic_id=host_star_tic_id,
             ln_evidence=lnZ,
             host_mass_msun=samples["masses_possible"][idxs[idx]],
             host_radius_rsun=samples["radii_possible"][idxs[idx]],
@@ -698,14 +700,15 @@ class NTPEvolvedScenario(BaseScenario):
         self, samples: dict[str, np.ndarray], geometry: dict[str, np.ndarray],
         ldc: LimbDarkeningCoeffs, lnZ: float, idx: np.ndarray,
         stellar_params: StellarParameters,
-        external_lcs: list[ExternalLightCurve], twin: bool = False,
+        external_lcs: list[ExternalLightCurve], host_star_tic_id: int,
+        twin: bool = False,
     ) -> ScenarioResult:
         """Source: marginal_likelihoods.py:4268-4285"""
         n = len(idx)
 
         return ScenarioResult(
             scenario_id=ScenarioID.NTP,
-            host_star_tic_id=0,
+            host_star_tic_id=host_star_tic_id,
             ln_evidence=lnZ,
             host_mass_msun=samples["M_s"][:n],
             host_radius_rsun=samples["R_s"][:n],
@@ -862,7 +865,8 @@ class NEBEvolvedScenario(BaseScenario):
         self, samples: dict[str, np.ndarray], geometry: dict[str, np.ndarray],
         ldc: LimbDarkeningCoeffs, lnZ: float, idx: np.ndarray,
         stellar_params: StellarParameters,
-        external_lcs: list[ExternalLightCurve], twin: bool = False,
+        external_lcs: list[ExternalLightCurve], host_star_tic_id: int,
+        twin: bool = False,
     ) -> ScenarioResult:
         """Source: marginal_likelihoods.py:4462-4503"""
         n = len(idx)
@@ -876,7 +880,7 @@ class NEBEvolvedScenario(BaseScenario):
 
         return ScenarioResult(
             scenario_id=sid,
-            host_star_tic_id=0,
+            host_star_tic_id=host_star_tic_id,
             ln_evidence=lnZ,
             host_mass_msun=samples["M_s"][:n],
             host_radius_rsun=samples["R_s"][:n],

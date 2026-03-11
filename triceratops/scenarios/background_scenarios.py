@@ -300,7 +300,8 @@ class DTPScenario(BaseScenario):
         self, samples: dict[str, np.ndarray], geometry: dict[str, np.ndarray],
         ldc: LimbDarkeningCoeffs, lnZ: float, idx: np.ndarray,
         stellar_params: StellarParameters,
-        external_lcs: list[ExternalLightCurve], twin: bool = False,
+        external_lcs: list[ExternalLightCurve], host_star_tic_id: int,
+        twin: bool = False,
     ) -> ScenarioResult:
         """Pack DTP results.
 
@@ -327,7 +328,7 @@ class DTPScenario(BaseScenario):
 
         return ScenarioResult(
             scenario_id=ScenarioID.DTP,
-            host_star_tic_id=0,
+            host_star_tic_id=host_star_tic_id,
             ln_evidence=lnZ,
             host_mass_msun=np.full(n, stellar_params.mass_msun),
             host_radius_rsun=np.full(n, stellar_params.radius_rsun),
@@ -632,7 +633,8 @@ class DEBScenario(BaseScenario):
         self, samples: dict[str, np.ndarray], geometry: dict[str, np.ndarray],
         ldc: LimbDarkeningCoeffs, lnZ: float, idx: np.ndarray,
         stellar_params: StellarParameters,
-        external_lcs: list[ExternalLightCurve], twin: bool = False,
+        external_lcs: list[ExternalLightCurve], host_star_tic_id: int,
+        twin: bool = False,
     ) -> ScenarioResult:
         """Pack DEB results.
 
@@ -672,7 +674,7 @@ class DEBScenario(BaseScenario):
 
         return ScenarioResult(
             scenario_id=sid,
-            host_star_tic_id=0,
+            host_star_tic_id=host_star_tic_id,
             ln_evidence=lnZ,
             host_mass_msun=np.full(n, stellar_params.mass_msun),
             host_radius_rsun=np.full(n, stellar_params.radius_rsun),
@@ -952,7 +954,8 @@ class BTPScenario(BaseScenario):
         self, samples: dict[str, np.ndarray], geometry: dict[str, np.ndarray],
         ldc: LimbDarkeningCoeffs, lnZ: float, idx: np.ndarray,
         stellar_params: StellarParameters,
-        external_lcs: list[ExternalLightCurve], twin: bool = False,
+        external_lcs: list[ExternalLightCurve], host_star_tic_id: int,
+        twin: bool = False,
     ) -> ScenarioResult:
         """Pack BTP results.
 
@@ -995,7 +998,7 @@ class BTPScenario(BaseScenario):
 
         return ScenarioResult(
             scenario_id=ScenarioID.BTP,
-            host_star_tic_id=0,
+            host_star_tic_id=host_star_tic_id,
             ln_evidence=lnZ,
             host_mass_msun=masses_comp[idxs[idx]],
             host_radius_rsun=radii_comp[idxs[idx]],
@@ -1454,7 +1457,8 @@ class BEBScenario(BaseScenario):
         self, samples: dict[str, np.ndarray], geometry: dict[str, np.ndarray],
         ldc: LimbDarkeningCoeffs, lnZ: float, idx: np.ndarray,
         stellar_params: StellarParameters,
-        external_lcs: list[ExternalLightCurve], twin: bool = False,
+        external_lcs: list[ExternalLightCurve], host_star_tic_id: int,
+        twin: bool = False,
     ) -> ScenarioResult:
         """Pack BEB results.
 
@@ -1505,7 +1509,7 @@ class BEBScenario(BaseScenario):
 
         return ScenarioResult(
             scenario_id=sid,
-            host_star_tic_id=0,
+            host_star_tic_id=host_star_tic_id,
             ln_evidence=lnZ,
             host_mass_msun=masses_comp[idxs[idx]],
             host_radius_rsun=radii_comp[idxs[idx]],
