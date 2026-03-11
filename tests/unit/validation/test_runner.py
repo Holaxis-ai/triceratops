@@ -11,7 +11,7 @@ from triceratops.domain.scenario_id import ScenarioID
 from triceratops.lightcurve.ephemeris import Ephemeris
 from triceratops.lightcurve.config import LightCurveConfig
 from triceratops.lightcurve.result import LightCurvePreparationResult
-from triceratops.lightcurve.exofop.toi_resolution import (
+from auto_fpp.exofop import (
     LookupStatus,
     ToiResolutionResult,
 )

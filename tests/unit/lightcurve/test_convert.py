@@ -9,7 +9,7 @@ import lightkurve as lk
 
 from triceratops.domain.entities import LightCurve
 from triceratops.lightcurve.config import LightCurveConfig
-from triceratops.lightcurve.convert import convert_folded_to_domain
+from auto_fpp.convert import convert_folded_to_domain
 from triceratops.lightcurve.errors import LightCurveEmptyError, LightCurvePreparationError
 
 
