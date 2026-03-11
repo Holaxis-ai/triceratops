@@ -9,6 +9,8 @@ from auto_fpp.artifacts import (
     ApertureProvenance,
     ArtifactBundle,
     PreparedAutoFppArtifact,
+    SectorApertureManifest,
+    SectorApertureSelection,
     default_artifact_capabilities,
     make_prepared_artifact,
 )
@@ -170,6 +172,22 @@ def test_prepared_artifact_round_trips_to_bundle() -> None:
         aperture_mode="default",
         aperture_threshold_sigma=3.0,
         custom_aperture_pixels=(),
+        sector_aperture_overrides=(
+            SectorApertureManifest(
+                sector=14,
+                mode="threshold",
+                threshold_sigma=4.5,
+            ),
+        ),
+        sector_aperture_selections=(
+            SectorApertureSelection(
+                sector=14,
+                requested_mode="default",
+                effective_mode="pipeline",
+                threshold_sigma=3.0,
+                n_pixels=2,
+            ),
+        ),
         bin_count=100,
         search_radius_px=10,
         sigma_psf_px=0.75,
@@ -193,6 +211,8 @@ def test_prepared_artifact_round_trips_to_bundle() -> None:
     assert loaded.resolved_target.ephemeris is not None
     assert loaded.resolved_target.ephemeris.warnings == ("depth inferred",)
     assert loaded.light_curve_result.sectors_used == (14, 15)
+    assert loaded.sector_aperture_overrides == artifact.sector_aperture_overrides
+    assert loaded.sector_aperture_selections == artifact.sector_aperture_selections
     np.testing.assert_allclose(
         loaded.light_curve_result.light_curve.time_days,
         artifact.light_curve_result.light_curve.time_days,
@@ -251,6 +271,7 @@ def test_make_prepared_artifact_without_trilegal_is_not_compute_ready() -> None:
         aperture_mode="default",
         aperture_threshold_sigma=3.0,
         custom_aperture_pixels=(),
+        sector_aperture_overrides=(),
         bin_count=None,
         search_radius_px=10,
         sigma_psf_px=0.75,
@@ -259,6 +280,63 @@ def test_make_prepared_artifact_without_trilegal_is_not_compute_ready() -> None:
 
     assert artifact.artifact_kind == ARTIFACT_KIND_PREPARED
     assert artifact.artifact_capabilities.contains_trilegal_population is False
+
+
+def test_manifest_includes_sector_aperture_overrides() -> None:
+    artifact = make_prepared_artifact(
+        resolved_target=ResolvedTarget(
+            target_ref="TIC 12345",
+            tic_id=12345,
+            ephemeris=Ephemeris(period_days=5.0, t0_btjd=1000.0),
+            source="manual",
+        ),
+        light_curve_result=_light_curve_result(),
+        stellar_field=_stellar_field(),
+        transit_depth=0.001,
+        aperture_mode="default",
+        aperture_threshold_sigma=3.0,
+        custom_aperture_pixels=(),
+        sector_aperture_overrides=(
+            SectorApertureManifest(
+                sector=14,
+                mode="custom",
+                threshold_sigma=3.0,
+                custom_pixels=((1, 2), (3, 4)),
+            ),
+        ),
+        sector_aperture_selections=(
+            SectorApertureSelection(
+                sector=14,
+                requested_mode="default",
+                effective_mode="pipeline",
+                threshold_sigma=3.0,
+                n_pixels=2,
+            ),
+        ),
+        bin_count=None,
+        search_radius_px=10,
+        sigma_psf_px=0.75,
+        lightcurve_config=LightCurveConfig(),
+    )
+
+    manifest = artifact.to_manifest_dict()
+    assert manifest["sector_aperture_overrides"] == [
+        {
+            "sector": 14,
+            "mode": "custom",
+            "threshold_sigma": 3.0,
+            "custom_pixels": [[1, 2], [3, 4]],
+        }
+    ]
+    assert manifest["sector_aperture_selections"] == [
+        {
+            "sector": 14,
+            "requested_mode": "default",
+            "effective_mode": "pipeline",
+            "threshold_sigma": 3.0,
+            "n_pixels": 2,
+        }
+    ]
 
 
 def test_prepared_artifact_round_trips_extra_files() -> None:
