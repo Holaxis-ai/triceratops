@@ -14,6 +14,7 @@ from auto_fpp.artifacts import (
     ARTIFACT_KIND_COMPUTE_READY,
     ARTIFACT_KIND_PREPARED,
     ApertureProvenance,
+    ArtifactBundle,
     PreparedAutoFppArtifact,
     default_artifact_capabilities,
     make_prepared_artifact,
@@ -110,7 +111,7 @@ def test_default_artifact_capabilities_exclude_trilegal_without_population() -> 
     assert ScenarioID.BTP not in caps.supports_scenarios
 
 
-def test_prepared_artifact_round_trips_to_directory(tmp_path) -> None:
+def test_prepared_artifact_round_trips_to_bundle() -> None:
     unbinned = LightCurve(
         time_days=np.linspace(-0.2, 0.2, 16),
         flux=np.ones(16),
@@ -152,8 +153,8 @@ def test_prepared_artifact_round_trips_to_directory(tmp_path) -> None:
         unbinned_light_curve=unbinned,
     )
 
-    out_dir = artifact.to_directory(tmp_path / "artifact")
-    loaded = PreparedAutoFppArtifact.from_directory(out_dir)
+    bundle = artifact.to_bundle()
+    loaded = PreparedAutoFppArtifact.from_bundle(bundle)
 
     assert loaded.artifact_kind == ARTIFACT_KIND_COMPUTE_READY
     assert loaded.resolved_target.target_ref == "TOI-123.01"
@@ -174,6 +175,34 @@ def test_prepared_artifact_round_trips_to_directory(tmp_path) -> None:
     )
     assert loaded.unbinned_light_curve is not None
     np.testing.assert_allclose(loaded.unbinned_light_curve.time_days, unbinned.time_days)
+
+
+def test_artifact_bundle_round_trips_through_directory(tmp_path) -> None:
+    artifact = make_prepared_artifact(
+        resolved_target=ResolvedTarget(
+            target_ref="TIC 12345",
+            tic_id=12345,
+            ephemeris=Ephemeris(period_days=5.0, t0_btjd=1000.0),
+            source="manual",
+        ),
+        light_curve_result=_light_curve_result(),
+        stellar_field=_stellar_field(),
+        transit_depth=0.001,
+        aperture_mode="default",
+        aperture_threshold_sigma=3.0,
+        custom_aperture_pixels=(),
+        bin_count=None,
+        search_radius_px=10,
+        sigma_psf_px=0.75,
+        lightcurve_config=LightCurveConfig(),
+    )
+    bundle = artifact.to_bundle()
+    out_dir = bundle.write_directory(tmp_path / "artifact")
+    loaded_bundle = ArtifactBundle.from_directory(out_dir)
+    loaded = PreparedAutoFppArtifact.from_bundle(loaded_bundle)
+
+    assert "manifest.json" in loaded_bundle.files
+    assert loaded.resolved_target.tic_id == artifact.resolved_target.tic_id
 
 
 def test_make_prepared_artifact_without_trilegal_is_not_compute_ready() -> None:

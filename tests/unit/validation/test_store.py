@@ -98,7 +98,7 @@ def test_filesystem_store_uses_explicit_key(tmp_path) -> None:
 
     assert ref == StoredArtifactRef(
         key="custom-key",
-        location=str(tmp_path / "custom-key"),
+        locator=str(tmp_path / "custom-key"),
         store_kind="filesystem",
     )
 
