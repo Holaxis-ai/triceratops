@@ -13,14 +13,13 @@ from triceratops.assembly.errors import (
     CatalogAcquisitionError,
 )
 from triceratops.assembly.orchestrator import DataAssemblyOrchestrator
-from triceratops.domain.entities import StellarField, Star
+from triceratops.domain.entities import Star, StellarField
 from triceratops.domain.molusc import MoluscData
 from triceratops.domain.scenario_id import ScenarioID
 from triceratops.domain.value_objects import ContrastCurve, StellarParameters
 from triceratops.lightcurve.ephemeris import Ephemeris, ResolvedTarget
 from triceratops.population.protocols import TRILEGALResult
 from triceratops.scenarios.registry import ScenarioRegistry
-
 
 # ---------------------------------------------------------------------------
 # Helpers / stubs
@@ -170,6 +169,11 @@ class StubExternalLcSource:
     def load(self) -> list:
         self.call_count += 1
         return []
+
+
+class StubLcSource:
+    def __init__(self) -> None:
+        self.call_count = 0
 
 
 def _make_trilegal_registry() -> ScenarioRegistry:
@@ -527,6 +531,28 @@ class TestAssemblyMetadataOutput:
         assert "molusc_data" in per_input
         assert "trilegal_population" in per_input
 
+    def test_metadata_tracks_external_lcs_when_loaded(
+        self, monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        catalog = StubCatalogProvider()
+        orch = DataAssemblyOrchestrator(
+            catalog_provider=catalog,
+            external_lc_source=StubExternalLcSource(),
+        )
+        target = _make_resolved_target()
+        config = AssemblyConfig(include_light_curve=False, include_external_lcs=True)
+
+        monkeypatch.setattr(
+            "triceratops.assembly.pipelines.external_lcs.assemble_external_lcs",
+            lambda source: ([], ["external warning"]),
+        )
+
+        result = orch.assemble(target, config)
+
+        assert "external_lcs" in result.metadata.source_labels
+        assert "external warning" in result.metadata.warnings
+        assert dict(result.metadata.per_input_source)["external_lcs"] == "external_lc_source"
+
 
 # ---------------------------------------------------------------------------
 # Light curve edge cases
@@ -581,6 +607,97 @@ class TestAssembleLightCurve:
 
         result = orch.assemble(target, config)
         assert result.light_curve is None
+
+    def test_lc_assembly_records_metadata_when_source_provided(
+        self, monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        catalog = StubCatalogProvider()
+        orch = DataAssemblyOrchestrator(
+            catalog_provider=catalog,
+            lc_source=StubLcSource(),  # type: ignore[arg-type]
+        )
+        target = _make_resolved_target(with_ephemeris=True)
+        config = AssemblyConfig(include_light_curve=True)
+        light_curve = object()
+
+        monkeypatch.setattr(
+            "triceratops.assembly.pipelines.lightcurve.assemble_light_curve",
+            lambda source, artifact_store, ephemeris, lc_config, require: (
+                light_curve,
+                "lc_source",
+                ["lightcurve warning"],
+                ["artifact-1"],
+            ),
+        )
+
+        result = orch.assemble(target, config)
+
+        assert result.light_curve is light_curve
+        assert "lc_source" in result.metadata.source_labels
+        assert "lightcurve warning" in result.metadata.warnings
+        assert result.metadata.artifact_ids == ("artifact-1",)
+        assert dict(result.metadata.per_input_source)["light_curve"] == "lc_source"
+
+
+class TestPrivateDelegationMethods:
+    def test_private_delegates_call_pipeline_functions(
+        self, monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        orch = DataAssemblyOrchestrator(
+            catalog_provider=StubCatalogProvider(),
+            lc_source=StubLcSource(),  # type: ignore[arg-type]
+            contrast_source=StubContrastSource(),
+            molusc_source=StubMoluscSource(),
+            external_lc_source=StubExternalLcSource(),
+            population_provider=StubPopulationProvider(),
+        )
+        target = _make_resolved_target(with_ephemeris=True)
+        config = AssemblyConfig()
+
+        monkeypatch.setattr(
+            "triceratops.assembly.pipelines.lightcurve.assemble_light_curve",
+            lambda source, artifact_store, ephemeris, lc_config, require: (
+                "lc",
+                "label",
+                [],
+                ["artifact"],
+            ),
+        )
+        monkeypatch.setattr(
+            "triceratops.assembly.pipelines.contrast.assemble_contrast_curve",
+            lambda source, band: (_make_contrast_curve(), ["contrast warning"]),
+        )
+        monkeypatch.setattr(
+            "triceratops.assembly.pipelines.molusc.assemble_molusc",
+            lambda source: (_make_molusc_data(), ["molusc warning"]),
+        )
+        monkeypatch.setattr(
+            "triceratops.assembly.pipelines.trilegal.assemble_trilegal",
+            lambda source, field, cache_path: (_make_trilegal(), ["trilegal warning"]),
+        )
+        monkeypatch.setattr(
+            "triceratops.assembly.pipelines.external_lcs.assemble_external_lcs",
+            lambda source: (["ext"], ["external warning"]),
+        )
+
+        lc, lc_label, lc_warnings, lc_artifacts = orch._assemble_light_curve(target, config)
+        cc, cc_warnings = orch._assemble_contrast_curve(config)
+        mol, mol_warnings = orch._assemble_molusc()
+        tri, tri_warnings = orch._assemble_trilegal(_make_stellar_field(), config)
+        ext, ext_warnings = orch._assemble_external_lcs()
+
+        assert lc == "lc"
+        assert lc_label == "label"
+        assert lc_artifacts == ["artifact"]
+        assert lc_warnings == []
+        assert cc.band == "TESS"
+        assert cc_warnings == ["contrast warning"]
+        assert mol.mass_ratio.shape == (2,)
+        assert mol_warnings == ["molusc warning"]
+        assert tri.tmags.shape == (1,)
+        assert tri_warnings == ["trilegal warning"]
+        assert ext == ["ext"]
+        assert ext_warnings == ["external warning"]
 
 
 # ---------------------------------------------------------------------------
