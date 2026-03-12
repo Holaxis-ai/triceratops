@@ -16,3 +16,5 @@ working_docs/
 .auto-fpp.*.toml
 !.auto-fpp.example.toml
 .auto-fpp-spool/
+.auto-fpp-workspace.db
+.auto-fpp-workspace.db-*
