@@ -12,6 +12,7 @@ from triceratops.domain.entities import ExternalLightCurve, LightCurve, Star, St
 from triceratops.domain.result import ScenarioResult, ValidationResult
 from triceratops.domain.scenario_id import ScenarioID
 from triceratops.domain.value_objects import StellarParameters
+from triceratops.lightcurve.ephemeris import Ephemeris, ResolvedTarget
 from triceratops.scenarios.registry import ScenarioRegistry
 from triceratops.validation.workspace import ValidationWorkspace
 
@@ -209,6 +210,35 @@ class TestWorkspaceConstruction:
         with pytest.raises(CatalogAcquisitionError, match="boom"):
             _ = ws.stars
 
+    def test_stars_df_includes_stellar_params_columns(
+        self, workspace: ValidationWorkspace,
+    ) -> None:
+        df = workspace.stars_df
+        assert set(["tic_id", "mass_msun", "radius_rsun", "teff_k"]).issubset(df.columns)
+
+    def test_resolve_target_without_resolver_raises(self) -> None:
+        ws = ValidationWorkspace(
+            tic_id=12345678,
+            sectors=np.array([1]),
+            catalog_provider=StubStarCatalogProvider(),
+        )
+
+        with pytest.raises(RuntimeError, match="No ephemeris_resolver"):
+            ws.resolve_target("TOI-123.01")
+
+    def test_set_resolved_target_rejects_mismatched_tic(
+        self, workspace: ValidationWorkspace,
+    ) -> None:
+        resolved = ResolvedTarget(
+            target_ref="TOI-123.01",
+            tic_id=999,
+            ephemeris=Ephemeris(period_days=5.0, t0_btjd=1000.0),
+            source="test",
+        )
+
+        with pytest.raises(ValueError, match="does not match workspace TIC ID"):
+            workspace.set_resolved_target(resolved)
+
 
 # ---------------------------------------------------------------------------
 # Star mutation tests
@@ -257,6 +287,174 @@ class TestStarMutation:
     ) -> None:
         with pytest.raises(AttributeError, match="no attribute"):
             workspace.update_star(12345678, nonexistent_field=42)
+
+    def test_calc_depths_updates_flux_ratio_and_depth(
+        self, workspace: ValidationWorkspace, monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        monkeypatch.setattr(
+            "triceratops.validation.workspace.compute_flux_ratios",
+            lambda field, pixel_coords, aperture_pixels, sigma: np.array([0.8, 0.2]),
+        )
+        monkeypatch.setattr(
+            "triceratops.validation.workspace.compute_transit_depths",
+            lambda flux_ratios, depth: np.array([depth / fr for fr in flux_ratios]),
+        )
+
+        workspace._last_result = ValidationResult(
+            target_id=12345678,
+            false_positive_probability=0.5,
+            nearby_false_positive_probability=0.0,
+            scenario_results=[],
+        )
+        workspace.calc_depths(
+            transit_depth=0.01,
+            pixel_coords_per_sector=[np.array([[0.0, 0.0], [1.0, 1.0]])],
+            aperture_pixels_per_sector=[np.array([[0.0, 0.0]])],
+        )
+
+        assert workspace.stars[0].flux_ratio == pytest.approx(0.8)
+        assert workspace.stars[1].transit_depth_required == pytest.approx(0.05)
+        assert workspace.results is None
+
+
+class TestWorkspacePlotDelegation:
+    def test_plot_field_delegates(self, workspace: ValidationWorkspace, monkeypatch) -> None:
+        calls: list[tuple[StellarField, int, dict[str, object]]] = []
+
+        monkeypatch.setattr(
+            "triceratops.plotting.plot_field",
+            lambda field, search_radius, **kwargs: calls.append((field, search_radius, kwargs)),
+        )
+
+        workspace.plot_field(save=True, fname="field")
+
+        assert calls and calls[0][1] == workspace.search_radius
+        assert calls[0][2]["fname"] == "field"
+
+    def test_plot_fits_requires_cached_result(self, workspace: ValidationWorkspace) -> None:
+        with pytest.raises(RuntimeError, match="compute_probs\\(\\) must be called"):
+            workspace.plot_fits()
+
+    def test_plot_fits_requires_cached_lightcurve(self, workspace: ValidationWorkspace) -> None:
+        workspace._last_result = ValidationResult(
+            target_id=12345678,
+            false_positive_probability=0.1,
+            nearby_false_positive_probability=0.0,
+            scenario_results=[],
+        )
+
+        with pytest.raises(RuntimeError, match="No light curve stored"):
+            workspace.plot_fits()
+
+    def test_plot_fits_delegates_with_cached_state(
+        self, workspace: ValidationWorkspace, transit_lc: LightCurve, monkeypatch,
+    ) -> None:
+        workspace._last_light_curve = transit_lc
+        workspace._last_result = ValidationResult(
+            target_id=12345678,
+            false_positive_probability=0.1,
+            nearby_false_positive_probability=0.0,
+            scenario_results=[],
+        )
+        calls: list[tuple[LightCurve, ValidationResult, dict[str, object]]] = []
+        monkeypatch.setattr(
+            "triceratops.plotting.plot_fits",
+            lambda lc, result, **kwargs: calls.append((lc, result, kwargs)),
+        )
+
+        workspace.plot_fits(save=True, fname="fits")
+
+        assert calls and calls[0][0] is transit_lc
+        assert calls[0][2]["fname"] == "fits"
+
+    def test_plot_fits_palomar_requires_external_lcs(
+        self, workspace: ValidationWorkspace, transit_lc: LightCurve,
+    ) -> None:
+        workspace._last_result = ValidationResult(
+            target_id=12345678,
+            false_positive_probability=0.1,
+            nearby_false_positive_probability=0.0,
+            scenario_results=[],
+        )
+        workspace._last_light_curve = transit_lc
+
+        with pytest.raises(RuntimeError, match="No external light curves stored"):
+            workspace.plot_fits_palomar()
+
+    def test_plot_fits_palomar_delegates(
+        self,
+        workspace: ValidationWorkspace,
+        transit_lc: LightCurve,
+        external_lc: ExternalLightCurve,
+        monkeypatch,
+    ) -> None:
+        workspace._last_result = ValidationResult(
+            target_id=12345678,
+            false_positive_probability=0.1,
+            nearby_false_positive_probability=0.0,
+            scenario_results=[],
+        )
+        workspace._last_light_curve = transit_lc
+        workspace._last_external_lcs = [external_lc]
+        calls: list[tuple[ExternalLightCurve, ValidationResult, dict[str, object]]] = []
+        monkeypatch.setattr(
+            "triceratops.plotting.plot_fits_palomar",
+            lambda ext, result, **kwargs: calls.append((ext, result, kwargs)),
+        )
+
+        workspace.plot_fits_palomar(save=True, fname="palomar")
+
+        assert calls and calls[0][0] is external_lc
+        assert calls[0][2]["reference_light_curve"] is transit_lc
+        assert calls[0][2]["fname"] == "palomar"
+
+    def test_plot_fits_joint_requires_lightcurve_and_external_lcs(
+        self, workspace: ValidationWorkspace,
+    ) -> None:
+        workspace._last_result = ValidationResult(
+            target_id=12345678,
+            false_positive_probability=0.1,
+            nearby_false_positive_probability=0.0,
+            scenario_results=[],
+        )
+
+        with pytest.raises(RuntimeError, match="No light curve stored"):
+            workspace.plot_fits_joint()
+
+        workspace._last_light_curve = LightCurve(
+            time_days=np.array([0.0]),
+            flux=np.array([1.0]),
+            flux_err=0.001,
+        )
+        with pytest.raises(RuntimeError, match="No external light curves stored"):
+            workspace.plot_fits_joint()
+
+    def test_plot_fits_joint_delegates(
+        self,
+        workspace: ValidationWorkspace,
+        transit_lc: LightCurve,
+        external_lc: ExternalLightCurve,
+        monkeypatch,
+    ) -> None:
+        workspace._last_result = ValidationResult(
+            target_id=12345678,
+            false_positive_probability=0.1,
+            nearby_false_positive_probability=0.0,
+            scenario_results=[],
+        )
+        workspace._last_light_curve = transit_lc
+        workspace._last_external_lcs = [external_lc]
+        calls: list[tuple[LightCurve, ExternalLightCurve, ValidationResult, dict[str, object]]] = []
+        monkeypatch.setattr(
+            "triceratops.plotting.plot_fits_joint",
+            lambda lc, ext, result, **kwargs: calls.append((lc, ext, result, kwargs)),
+        )
+
+        workspace.plot_fits_joint(save=True, fname="joint")
+
+        assert calls and calls[0][0] is transit_lc
+        assert calls[0][1] is external_lc
+        assert calls[0][3]["fname"] == "joint"
 
     def test_remove_target_raises(self, workspace: ValidationWorkspace) -> None:
         """Removing the target star must raise, not silently corrupt the field."""
