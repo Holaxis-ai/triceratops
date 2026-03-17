@@ -28,7 +28,7 @@ from triceratops.domain.entities import (
 from triceratops.domain.molusc import MoluscData
 from triceratops.domain.result import ScenarioResult, ValidationResult
 from triceratops.domain.scenario_id import ScenarioID
-from triceratops.domain.value_objects import ContrastCurve, StellarParameters
+from triceratops.domain.value_objects import ContrastCurve, PeriodSpec, StellarParameters
 from triceratops.population.protocols import TRILEGALResult
 from triceratops.scenarios.base import Scenario
 from triceratops.scenarios.nearby_scenarios import EmptyTrilegalPeerPopulationError
@@ -47,7 +47,7 @@ class ScenarioExecutionContext:
     scenario: Scenario
     light_curve: LightCurve
     stellar_params: StellarParameters
-    period_days: float | list[float] | tuple[float, float]
+    period_days: PeriodSpec
     config: Config
     external_lcs: list[ExternalLightCurve] = field(default_factory=list)
     # Scenario-specific kwargs (kept as dict for backward compat with **kwargs pattern)
@@ -170,25 +170,14 @@ class ValidationEngine:
     def __init__(
         self,
         registry: ScenarioRegistry | None = None,
-        catalog_provider: object | None = None,
-        population_provider: object | None = None,
     ) -> None:
-        # DEPRECATED: population_provider is no longer used inside compute().
-        # TRILEGAL population must now be fetched by the caller (ValidationWorkspace
-        # or ValidationPreparer) and passed directly via the trilegal_population
-        # parameter of compute() or compute_prepared().
-        # population_provider is accepted here to avoid breaking existing call sites;
-        # it will be removed in a future release.
         self._registry = registry if registry is not None else DEFAULT_REGISTRY
-        self._catalog = catalog_provider
-        # _population retained for compat but no longer called internally.
-        self._population = population_provider
 
-    def compute(
+    def _compute(
         self,
         light_curve: LightCurve,
         stellar_field: StellarField,
-        period_days: float | list[float] | tuple[float, float],
+        period_days: PeriodSpec,
         config: Config,
         scenario_ids: Sequence[ScenarioID] | None = None,
         external_lcs: list[ExternalLightCurve] | None = None,
@@ -235,7 +224,7 @@ class ValidationEngine:
         # trilegal_population must be pre-materialised by the caller.
         # The engine no longer fetches from any provider (Phase 2 boundary).
         # Callers: pass trilegal_population directly, or rely on ValidationWorkspace /
-        # ValidationPreparer to fetch it before calling compute().
+        # ValidationPreparer to fetch it before calling _compute().
 
         host_magnitudes = self._extract_host_magnitudes(stellar_field.target)
         target_flux_ratio = stellar_field.target.flux_ratio
@@ -317,7 +306,7 @@ class ValidationEngine:
         """Provider-free compute entrypoint.
 
         Accepts a fully-materialised PreparedValidationInputs and delegates to the
-        existing compute() logic.  No providers are called; all required data must
+        existing _compute() logic.  No providers are called; all required data must
         already be present in the prepared payload.
 
         This is the correct entrypoint for remote execution (e.g. Modal workers)
@@ -350,7 +339,7 @@ class ValidationEngine:
         # Guard: scenario_ids must all be registered in this engine's registry.
         # PreparedValidationInputs supports direct construction and deserialization,
         # so we cannot rely on ValidationPreparer.prepare() having validated them.
-        # compute() resolves IDs with self._registry.get() which raises KeyError;
+        # _compute() resolves IDs with self._registry.get() which raises KeyError;
         # we raise ValueError here instead with the unknown IDs named.
         if prepared.scenario_ids is not None:
             unknown = [sid for sid in prepared.scenario_ids if sid not in self._registry]
@@ -383,7 +372,7 @@ class ValidationEngine:
                     "or exclude TRILEGAL-dependent scenarios via scenario_ids."
                 )
 
-        return self.compute(
+        return self._compute(
             light_curve=prepared.light_curve,
             stellar_field=prepared.stellar_field,
             period_days=prepared.period_days,

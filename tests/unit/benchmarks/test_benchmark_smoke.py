@@ -33,7 +33,7 @@ def benchmarking_engine_result():
     np.random.seed(42)
     engine, light_curve, stellar_field, config, extra_kwargs = load_toi4051_inputs(n=100)
 
-    result = engine.compute(
+    result = engine._compute(
         light_curve=light_curve,
         stellar_field=stellar_field,
         period_days=extra_kwargs["period_days"],

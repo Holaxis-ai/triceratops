@@ -39,6 +39,7 @@ import numpy as np
 
 from triceratops.config.config import Config
 from triceratops.domain.scenario_id import ScenarioID
+from triceratops.domain.value_objects import PeriodSpec
 from triceratops.scenarios.registry import DEFAULT_REGISTRY, ScenarioRegistry
 from triceratops.validation.job import PreparedValidationInputs
 
@@ -72,7 +73,7 @@ class ValidationPreparer:
         self,
         assembled: AssembledInputs,
         config: Config,
-        period_days: float | list[float] | tuple[float, float],
+        period_days: PeriodSpec,
         *,
         scenario_ids: list[ScenarioID] | None = None,
     ) -> PreparedValidationInputs:

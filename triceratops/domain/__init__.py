@@ -11,15 +11,22 @@ from .value_objects import (
     ContrastCurve,
     LimbDarkeningCoeffs,
     OrbitalParameters,
+    PeriodSpec,
     StellarParameters,
 )
 
+from triceratops.lightcurve.ephemeris import Ephemeris, EphemerisResolver, ResolvedTarget
+
 __all__: list[str] = [
     "ContrastCurve",
+    "Ephemeris",
+    "EphemerisResolver",
     "ExternalLightCurve",
     "LightCurve",
     "LimbDarkeningCoeffs",
     "OrbitalParameters",
+    "PeriodSpec",
+    "ResolvedTarget",
     "ScenarioID",
     "ScenarioResult",
     "Star",

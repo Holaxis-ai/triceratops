@@ -110,13 +110,13 @@ class TestMissingStellarParams:
         assert "12345" in str(exc_info.value)
 
     def test_compute_raises_instead_of_returning_fpp_1(self) -> None:
-        """Silent FPP=1.0 regression guard: compute() must raise, not return."""
+        """Silent FPP=1.0 regression guard: _compute() must raise, not return."""
         from triceratops.validation.engine import ValidationEngine
 
         engine = ValidationEngine()
         field = _field(with_params=False)
         with pytest.raises(PreparedInputIncompleteError, match="stellar_params"):
-            engine.compute(
+            engine._compute(
                 light_curve=_lc(),
                 stellar_field=field,
                 period_days=5.0,

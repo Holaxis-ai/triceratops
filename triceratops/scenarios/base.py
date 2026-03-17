@@ -15,7 +15,7 @@ from triceratops.config.config import CONST, Config
 from triceratops.domain.entities import ExternalLightCurve, LightCurve
 from triceratops.domain.result import ScenarioResult
 from triceratops.domain.scenario_id import ScenarioID
-from triceratops.domain.value_objects import LimbDarkeningCoeffs, StellarParameters
+from triceratops.domain.value_objects import LimbDarkeningCoeffs, PeriodSpec, StellarParameters
 from triceratops.scenarios.kernels import (
     compute_lnZ,
     pack_best_indices,
@@ -40,7 +40,7 @@ class Scenario(Protocol):
         self,
         light_curve: LightCurve,
         stellar_params: StellarParameters,
-        period_days: float | list[float] | tuple[float, float],
+        period_days: PeriodSpec,
         config: Config,
         external_lcs: list[ExternalLightCurve] | None = None,
         **kwargs: object,
@@ -96,7 +96,7 @@ class BaseScenario(ABC):
         self,
         light_curve: LightCurve,
         stellar_params: StellarParameters,
-        period_days: float | list[float] | tuple[float, float],
+        period_days: PeriodSpec,
         config: Config,
         external_lcs: list[ExternalLightCurve] | None = None,
         **kwargs: object,

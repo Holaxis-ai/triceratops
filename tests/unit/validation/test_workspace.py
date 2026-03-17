@@ -525,7 +525,7 @@ class TestResultAccess:
 
 class TestComputeProbsScenarioIdsPath:
     """compute_probs(scenario_ids=...) must route through compute_prepared(),
-    not bypass the field validation gate via engine.compute() directly."""
+    not bypass the field validation gate via engine._compute() directly."""
 
     def _make_workspace_with_registry(self, registry: ScenarioRegistry) -> ValidationWorkspace:
         ws = ValidationWorkspace(

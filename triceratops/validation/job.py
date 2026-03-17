@@ -32,6 +32,8 @@ from typing import TYPE_CHECKING
 
 from collections.abc import Sequence
 
+from triceratops.domain.value_objects import PeriodSpec
+
 if TYPE_CHECKING:
     from triceratops.config.config import Config
     from triceratops.domain.entities import ExternalLightCurve, LightCurve, StellarField
@@ -85,7 +87,7 @@ class PreparedValidationInputs:
     stellar_field: StellarField
     light_curve: LightCurve
     config: Config
-    period_days: float | list[float] | tuple[float, float]
+    period_days: PeriodSpec
     trilegal_population: TRILEGALResult | None = None
     external_lcs: list[ExternalLightCurve] | None = None
     contrast_curve: ContrastCurve | None = None

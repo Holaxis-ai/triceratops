@@ -5,6 +5,13 @@ from dataclasses import dataclass
 
 import numpy as np
 
+PeriodSpec = float | tuple[float, float]
+"""Orbital period specification: a scalar (days) or (min, max) range.
+
+Runtime callers may also pass ``list[float]`` — existing validation code
+accepts it — but the public type signature uses this narrower alias.
+"""
+
 
 def _is_nan(v: object) -> bool:
     """Return True if v is a float NaN (handles None, str, int safely)."""

@@ -297,8 +297,8 @@ class TestComputePrepared:
 
         engine = ValidationEngine(registry=registry)
 
-        # via compute()
-        vr_direct = engine.compute(
+        # via _compute()
+        vr_direct = engine._compute(
             light_curve=lc,
             stellar_field=stellar_field,
             period_days=5.0,
@@ -332,36 +332,6 @@ class TestComputePrepared:
         vr = engine.compute_prepared(pvi)
         assert vr.fpp == 1.0
 
-    def test_compute_prepared_no_provider_called(
-        self, stellar_field: StellarField, lc: LightCurve, cfg: Config
-    ) -> None:
-        """compute_prepared must not call any provider (population or catalog)."""
-        class _BoomProvider:
-            def query(self, **kwargs: object) -> object:
-                raise AssertionError("provider should not be called during compute_prepared")
-            def query_nearby_stars(self, **kwargs: object) -> object:
-                raise AssertionError("provider should not be called during compute_prepared")
-
-        result = _make_scenario_result(ScenarioID.TP, lnZ=0.0)
-        fake = _FakeScenario(_scenario_id=ScenarioID.TP, _result=result)
-        registry = ScenarioRegistry()
-        registry.register(fake)
-
-        engine = ValidationEngine(
-            registry=registry,
-            catalog_provider=_BoomProvider(),
-            population_provider=_BoomProvider(),
-        )
-        pvi = PreparedValidationInputs(
-            target_id=stellar_field.target_id,
-            stellar_field=stellar_field,
-            light_curve=lc,
-            config=cfg,
-            period_days=5.0,
-        )
-        # Should not raise
-        vr = engine.compute_prepared(pvi)
-        assert isinstance(vr, ValidationResult)
 
 
 # ---------------------------------------------------------------------------
@@ -510,7 +480,7 @@ class TestPrepareComputeScenarioContract:
     def test_compute_prepared_passes_scenario_ids_to_engine(
         self, lc: LightCurve, cfg: Config
     ) -> None:
-        """compute_prepared() must call compute(scenario_ids=prepared.scenario_ids), not None."""
+        """compute_prepared() must call _compute(scenario_ids=prepared.scenario_ids), not None."""
         from unittest.mock import MagicMock, patch
         from triceratops.domain.scenario_id import ScenarioID
         from triceratops.domain.value_objects import StellarParameters
@@ -541,7 +511,7 @@ class TestPrepareComputeScenarioContract:
             scenario_ids=ids,
         )
         engine = ValidationEngine()
-        with patch.object(engine, "compute", wraps=engine.compute) as mock_compute:
+        with patch.object(engine, "_compute", wraps=engine._compute) as mock_compute:
             engine.compute_prepared(payload)
         call_kwargs = mock_compute.call_args
         assert call_kwargs.kwargs["scenario_ids"] == ids

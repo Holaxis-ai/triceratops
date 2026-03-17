@@ -19,7 +19,7 @@ from triceratops.config.config import Config
 from triceratops.domain.entities import ExternalLightCurve, LightCurve, Star, StellarField
 from triceratops.domain.result import ValidationResult
 from triceratops.domain.scenario_id import ScenarioID
-from triceratops.domain.value_objects import ContrastCurve
+from triceratops.domain.value_objects import ContrastCurve, PeriodSpec
 from triceratops.population.protocols import PopulationSynthesisProvider
 from triceratops.validation.engine import ValidationEngine
 from triceratops.validation.job import PreparedValidationInputs
@@ -83,10 +83,7 @@ class ValidationWorkspace:
         self._last_light_curve: LightCurve | None = None
         self._last_external_lcs: list[ExternalLightCurve] | None = None
 
-        self._engine = ValidationEngine(
-            catalog_provider=self._catalog_provider,
-            population_provider=self._population_provider,
-        )
+        self._engine = ValidationEngine()
 
         # Assembly-layer delegation objects (no I/O here)
         from triceratops.assembly.orchestrator import DataAssemblyOrchestrator
@@ -305,7 +302,7 @@ class ValidationWorkspace:
     def prepare(
         self,
         light_curve: LightCurve,
-        period_days: float | list[float] | tuple[float, float],
+        period_days: PeriodSpec,
         scenario_ids: list[ScenarioID] | None = None,
         external_lcs: list[ExternalLightCurve] | None = None,
         contrast_curve: ContrastCurve | None = None,
@@ -392,7 +389,7 @@ class ValidationWorkspace:
     def compute_probs(
         self,
         light_curve: LightCurve,
-        period_days: float | list[float] | tuple[float, float],
+        period_days: PeriodSpec,
         scenario_ids: list[ScenarioID] | None = None,
         external_lcs: list[ExternalLightCurve] | None = None,
         contrast_curve: ContrastCurve | None = None,
