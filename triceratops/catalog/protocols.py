@@ -53,7 +53,8 @@ class ApertureProvider(Protocol):
         """Return a list of 2D pixel arrays, one per sector/quarter/campaign.
 
         Args:
-            ra_deg, dec_deg: Coordinates of the target.
+            ra_deg: Right ascension of the target in degrees.
+            dec_deg: Declination of the target in degrees.
             size_px: Size of the cutout in pixels (square).
             sectors: Array of sector/quarter/campaign numbers.
             mission: Survey mission name.  Only ``"TESS"`` is fully supported;

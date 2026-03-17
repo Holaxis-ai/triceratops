@@ -18,3 +18,4 @@ working_docs/
 .auto-fpp-spool/
 .auto-fpp-workspace.db
 .auto-fpp-workspace.db-*
+site/

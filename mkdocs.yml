@@ -1,0 +1,30 @@
+site_name: TRICERATOPS
+site_description: Bayesian false-positive probability calculator for candidate exoplanets
+repo_url: https://github.com/collier/triceratops-fast
+
+theme:
+  name: material
+  palette:
+    scheme: default
+    primary: indigo
+
+plugins:
+  - search
+  - mkdocstrings:
+      handlers:
+        python:
+          options:
+            show_source: false
+            members_order: source
+            docstring_style: google
+
+nav:
+  - Home: index.md
+  - API Reference:
+      - Overview: api/index.md
+      - ValidationWorkspace: api/workspace.md
+      - ValidationEngine: api/engine.md
+      - Domain Types: api/domain.md
+      - Configuration: api/config.md
+      - Protocols: api/protocols.md
+      - Validation Internals: api/validation.md
