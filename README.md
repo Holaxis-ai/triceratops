@@ -58,6 +58,16 @@ result = ws.compute_prepared(prepared)
 `PreparedValidationInputs` is fully serializable — ship it to a remote worker
 (e.g., Modal) for scaled execution.
 
+## Numerical parity
+
+This implementation reproduces the original TRICERATOPS results with four
+documented bug fixes in the underlying numerics. All corrections are
+conservative (FPP decreases slightly) and are verified by deterministic
+golden regression tests at fixed random seeds.
+
+See [PARITY.md](PARITY.md) for the full numerical changes log with
+formulas, affected scenarios, and before/after comparisons.
+
 ## Documentation
 
 ```bash
