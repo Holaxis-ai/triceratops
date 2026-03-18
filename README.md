@@ -14,8 +14,12 @@ local or remote execution.
 
 ## Installation
 
+> **Note:** This package is not yet published to PyPI. Install from source:
+
 ```bash
-pip install holaxis-triceratops
+git clone https://github.com/Holaxis-ai/triceratops-2.git
+cd triceratops-2
+pip install -e .
 ```
 
 ## Quick start
