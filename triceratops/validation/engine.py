@@ -329,7 +329,7 @@ class ValidationEngine:
         if not work_items:
             return self._aggregate(
                 all_results,
-                stellar_field.target_id,
+                stellar_field,
                 warnings=all_warnings,
                 rng_seed=config.seed,
             )
@@ -358,7 +358,7 @@ class ValidationEngine:
                     all_warnings.extend(outcome.warnings)
                 return self._aggregate(
                     all_results,
-                    stellar_field.target_id,
+                    stellar_field,
                     warnings=all_warnings,
                     rng_seed=config.seed,
                 )
@@ -388,7 +388,7 @@ class ValidationEngine:
 
         return self._aggregate(
             all_results,
-            stellar_field.target_id,
+            stellar_field,
             warnings=all_warnings,
             rng_seed=config.seed,
         )
@@ -653,16 +653,29 @@ class ValidationEngine:
     @staticmethod
     def _aggregate(
         results: list[ScenarioResult],
-        target_id: int,
+        stellar_field: StellarField | None = None,
+        *,
+        target_id: int | None = None,
+        host_star_flux_ratio_tess_by_tic_id: dict[int, float] | None = None,
         warnings: list[str] | None = None,
         rng_seed: int | None = None,
     ) -> ValidationResult:
-        return _aggregate(results, target_id, warnings=warnings, rng_seed=rng_seed)
+        return _aggregate(
+            results,
+            stellar_field,
+            target_id=target_id,
+            host_star_flux_ratio_tess_by_tic_id=host_star_flux_ratio_tess_by_tic_id,
+            warnings=warnings,
+            rng_seed=rng_seed,
+        )
 
 
 def _aggregate(
     results: list[ScenarioResult],
-    target_id: int,
+    stellar_field: StellarField | None = None,
+    *,
+    target_id: int | None = None,
+    host_star_flux_ratio_tess_by_tic_id: dict[int, float] | None = None,
     warnings: list[str] | None = None,
     rng_seed: int | None = None,
 ) -> ValidationResult:
@@ -671,12 +684,28 @@ def _aggregate(
     FPP = 1 - P(TP) - P(PTP) - P(DTP)
     NFPP = sum of NTP + NEB + NEBx2P probabilities.
     """
+    resolved_target_id = target_id
+    resolved_flux_ratio_map = (
+        {}
+        if host_star_flux_ratio_tess_by_tic_id is None
+        else dict(host_star_flux_ratio_tess_by_tic_id)
+    )
+    if stellar_field is not None:
+        resolved_target_id = stellar_field.target_id
+        resolved_flux_ratio_map.update({
+            star.tic_id: float(star.flux_ratio)
+            for star in stellar_field.stars
+            if star.flux_ratio is not None
+        })
+    if resolved_target_id is None:
+        raise TypeError("_aggregate() requires either stellar_field or target_id")
     if not results:
         return ValidationResult(
-            target_id=target_id,
+            target_id=resolved_target_id,
             false_positive_probability=1.0,
             nearby_false_positive_probability=0.0,
             scenario_results=[],
+            host_star_flux_ratio_tess_by_tic_id=resolved_flux_ratio_map,
             warnings=[] if warnings is None else list(warnings),
             rng_seed=rng_seed,
         )
@@ -711,10 +740,11 @@ def _aggregate(
     ))
 
     return ValidationResult(
-        target_id=target_id,
+        target_id=resolved_target_id,
         false_positive_probability=fpp,
         nearby_false_positive_probability=nfpp,
         scenario_results=results,
+        host_star_flux_ratio_tess_by_tic_id=resolved_flux_ratio_map,
         warnings=[] if warnings is None else list(warnings),
         rng_seed=rng_seed,
     )

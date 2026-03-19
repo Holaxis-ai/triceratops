@@ -65,6 +65,7 @@ class ValidationResult:
     false_positive_probability: float       # FPP = 1 - P(TP) - P(PTP) - P(DTP)
     nearby_false_positive_probability: float  # NFPP = sum of N-scenario probabilities
     scenario_results: list[ScenarioResult]  # all scenarios run, in order
+    host_star_flux_ratio_tess_by_tic_id: dict[int, float] = field(default_factory=dict)
     warnings: list[str] = field(default_factory=list)
     rng_seed: int | None = None
 
