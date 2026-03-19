@@ -169,6 +169,7 @@ def _compute_lnprior_companion(
     delta_mags_map: dict[str, np.ndarray],
     contrast_curve: object | None,
     filt: str | None,
+    numerical_mode: str = "corrected",
 ) -> np.ndarray:
     """Compute the background companion prior for D-scenarios.
 
@@ -187,7 +188,29 @@ def _compute_lnprior_companion(
         # Recompute delta_mags from flux ratios for the drawn samples
         fr = fluxratios_comp[idxs]
         delta_mags_drawn = 2.5 * np.log10(fr / (1 - fr))
-        lnprior = np.full(n, np.log((n_comp / 0.1) * ARCSEC_TO_DEG**2 * COMPANION_DEFAULT_SEP_ARCSEC**2))
+        if numerical_mode == "legacy":
+            lnprior = np.full(
+                n,
+                np.log10(
+                    (n_comp / 0.1)
+                    * ARCSEC_TO_DEG**2
+                    * COMPANION_DEFAULT_SEP_ARCSEC**2
+                ),
+            )
+        elif numerical_mode == "corrected":
+            lnprior = np.full(
+                n,
+                np.log(
+                    (n_comp / 0.1)
+                    * ARCSEC_TO_DEG**2
+                    * COMPANION_DEFAULT_SEP_ARCSEC**2
+                ),
+            )
+        else:
+            raise ValueError(
+                "numerical_mode must be 'corrected' or 'legacy', "
+                f"got {numerical_mode!r}"
+            )
         lnprior[lnprior > 0.0] = 0.0
         lnprior[delta_mags_drawn > 0.0] = -np.inf
         return lnprior
@@ -204,7 +227,13 @@ def _compute_lnprior_companion(
     key = filt_key_map.get(filt or "", "delta_TESSmags")
     delta_mags_band = delta_mags_map[key][idxs]
 
-    lnprior = lnprior_background(n_comp, np.abs(delta_mags_band), separations, contrasts)
+    lnprior = lnprior_background(
+        n_comp,
+        np.abs(delta_mags_band),
+        separations,
+        contrasts,
+        numerical_mode=numerical_mode,
+    )
     lnprior[lnprior > 0.0] = 0.0
     lnprior[delta_mags_band > 0.0] = -np.inf
     return lnprior
@@ -216,6 +245,7 @@ def _compute_bright_background_lnprior(
     fluxratios_comp_band: np.ndarray,
     fluxratios_eb_band: np.ndarray,
     contrast_curve: object | None,
+    numerical_mode: str = "corrected",
 ) -> np.ndarray:
     """Background prior for BEB using combined host+EB brightness."""
     n = len(idxs)
@@ -224,12 +254,38 @@ def _compute_bright_background_lnprior(
     )
 
     if contrast_curve is None:
-        lnprior = np.full(n, np.log((n_comp / 0.1) * ARCSEC_TO_DEG**2 * COMPANION_DEFAULT_SEP_ARCSEC**2))
+        if numerical_mode == "legacy":
+            lnprior = np.full(
+                n,
+                np.log10(
+                    (n_comp / 0.1)
+                    * ARCSEC_TO_DEG**2
+                    * COMPANION_DEFAULT_SEP_ARCSEC**2
+                ),
+            )
+        elif numerical_mode == "corrected":
+            lnprior = np.full(
+                n,
+                np.log(
+                    (n_comp / 0.1)
+                    * ARCSEC_TO_DEG**2
+                    * COMPANION_DEFAULT_SEP_ARCSEC**2
+                ),
+            )
+        else:
+            raise ValueError(
+                "numerical_mode must be 'corrected' or 'legacy', "
+                f"got {numerical_mode!r}"
+            )
     else:
         separations = contrast_curve.separations_arcsec  # type: ignore[union-attr]
         contrasts = contrast_curve.delta_mags  # type: ignore[union-attr]
         lnprior = lnprior_background(
-            n_comp, np.abs(delta_mags), separations, contrasts,
+            n_comp,
+            np.abs(delta_mags),
+            separations,
+            contrasts,
+            numerical_mode=numerical_mode,
         )
 
     lnprior[lnprior > 0.0] = 0.0

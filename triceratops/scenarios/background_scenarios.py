@@ -46,7 +46,6 @@ from triceratops.priors.sampling import (
     sample_planet_radius,
 )
 from triceratops.scenarios._background_helpers import (
-    _combined_delta_mag,
     _compute_bright_background_lnprior,
     _compute_delta_mags_map,
     _compute_fluxratios_comp,
@@ -54,7 +53,6 @@ from triceratops.scenarios._background_helpers import (
     _compute_sdss_delta_mags,
     _filter_population_by_target_tmag,
     _lookup_background_ldc_bulk,
-    _needs_sdss_delta_mags,
     _relations,
     _resolve_sdss_target_mags,
     _sample_population_indices,
@@ -147,7 +145,13 @@ class DTPScenario(BaseScenario):
         # Companion prior
         contrast_curve = kwargs.get("contrast_curve")
         lnprior = _compute_lnprior_companion(
-            n_comp, fluxratios_comp, idxs, delta_mags_map, contrast_curve, filt,
+            n_comp,
+            fluxratios_comp,
+            idxs,
+            delta_mags_map,
+            contrast_curve,
+            filt,
+            config.numerical_mode,
         )
 
         # Sample planet priors (same as TTP but uses target star mass)
@@ -432,7 +436,13 @@ class DEBScenario(BaseScenario):
         # Companion prior (same as DTP)
         contrast_curve = kwargs.get("contrast_curve")
         lnprior = _compute_lnprior_companion(
-            n_comp, fluxratios_comp, idxs, delta_mags_map, contrast_curve, filt,
+            n_comp,
+            fluxratios_comp,
+            idxs,
+            delta_mags_map,
+            contrast_curve,
+            filt,
+            config.numerical_mode,
         )
 
         M_s = stellar_params.mass_msun
@@ -783,7 +793,13 @@ class BTPScenario(BaseScenario):
         # Background prior
         contrast_curve = kwargs.get("contrast_curve")
         lnprior = _compute_lnprior_companion(
-            n_comp, fluxratios_comp, idxs, delta_mags_map, contrast_curve, filt,
+            n_comp,
+            fluxratios_comp,
+            idxs,
+            delta_mags_map,
+            contrast_curve,
+            filt,
+            config.numerical_mode,
         )
 
         # BTP: planet radius sampled using background star mass
@@ -872,7 +888,10 @@ class BTPScenario(BaseScenario):
         )
 
         # Extra mask: logg >= 3.5 and Teff <= 10000
-        extra_mask = (loggs_comp[idxs] >= MAIN_SEQUENCE_LOGG_MIN) & (Teffs_comp[idxs] <= MAIN_SEQUENCE_TEFF_MAX)
+        extra_mask = (
+            (loggs_comp[idxs] >= MAIN_SEQUENCE_LOGG_MIN)
+            & (Teffs_comp[idxs] <= MAIN_SEQUENCE_TEFF_MAX)
+        )
         mask = build_transit_mask(
             samples["incs"], geometry["Ptra"], geometry["coll"],
             extra_mask=extra_mask,
@@ -1150,6 +1169,7 @@ class BEBScenario(BaseScenario):
             fluxratios_comp_band,
             fluxratios_band,
             contrast_curve,
+            config.numerical_mode,
         )
 
         return {
@@ -1296,7 +1316,10 @@ class BEBScenario(BaseScenario):
         )
 
         comp_fr = fluxratios_comp[idxs]
-        extra_logg_teff = (loggs_comp[idxs] >= MAIN_SEQUENCE_LOGG_MIN) & (Teffs_comp[idxs] <= MAIN_SEQUENCE_TEFF_MAX)
+        extra_logg_teff = (
+            (loggs_comp[idxs] >= MAIN_SEQUENCE_LOGG_MIN)
+            & (Teffs_comp[idxs] <= MAIN_SEQUENCE_TEFF_MAX)
+        )
 
         comp_params = {
             "u1s_comp": u1s_comp, "u2s_comp": u2s_comp,

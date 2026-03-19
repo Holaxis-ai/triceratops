@@ -174,6 +174,20 @@ class TestComputeLnZ:
         assert result <= lnL_max
         assert result > -np.inf
 
+    def test_legacy_mode_matches_original_shifted_formula(self) -> None:
+        lnL = np.full(50, -650.0)
+        result = compute_lnZ(lnL, numerical_mode="legacy")
+        assert result == pytest.approx(-650.0, abs=1e-10)
+
+    def test_legacy_mode_underflows_where_corrected_stays_finite(self) -> None:
+        lnL = np.full(100, -2000.0)
+        assert compute_lnZ(lnL, numerical_mode="corrected") == pytest.approx(-2000.0)
+        assert compute_lnZ(lnL, numerical_mode="legacy") == -np.inf
+
+    def test_invalid_numerical_mode_raises(self) -> None:
+        with pytest.raises(ValueError, match="numerical_mode"):
+            compute_lnZ(np.zeros(10), numerical_mode="bad-mode")
+
 
 # ---------------------------------------------------------------------------
 # pack_best_indices
