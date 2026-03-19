@@ -6,11 +6,12 @@ Determines whether a transit signal detected by TESS is a genuine planet or a fa
 (eclipsing binary, background blend, etc.) by computing the relative probabilities of ~34
 astrophysical scenarios.
 
-This is a modernized rewrite of the original
-[TRICERATOPS](https://github.com/stevengiacalone/triceratops) codebase
-(Giacalone & Dressing 2020, Giacalone et al. 2021), with a clean API,
-dependency-injected I/O, and a provider-free compute boundary suitable for
-local or remote execution.
+This is a modernized rewrite building on two prior codebases:
+
+- **[TRICERATOPS](https://github.com/stevengiacalone/triceratops)** — the original implementation by Giacalone & Dressing (2020) and Giacalone et al. (2021)
+- **[TRICERATOPS+](https://github.com/JGB276/TRICERATOPS-plus)** — extended fork by J.G. Barraza with additional scenario handling and bug fixes
+
+TRICERATOPS-2 refactors the core algorithms into a clean API with dependency-injected I/O and a provider-free compute boundary suitable for local or remote execution, while preserving numerical parity with the original implementations.
 
 ## Installation
 
@@ -82,6 +83,19 @@ To serve locally:
 pip install "holaxis-triceratops[docs]"
 mkdocs serve
 ```
+
+## Acknowledgments
+
+This project would not exist without the foundational work of:
+
+- **Steven Giacalone & Courtney Dressing** — creators of the original [TRICERATOPS](https://github.com/stevengiacalone/triceratops) (Giacalone & Dressing 2020, *ApJ*; Giacalone et al. 2021, *AJ*)
+- **J.G. Barraza** — author of [TRICERATOPS+](https://github.com/JGB276/TRICERATOPS-plus), which extended the original with additional scenario handling and corrections
+
+If you use this software in published research, please cite the original TRICERATOPS papers:
+
+> Giacalone, S. & Dressing, C. D. 2020, *The Astrophysical Journal*, 900, 24
+>
+> Giacalone, S. et al. 2021, *The Astronomical Journal*, 161, 24
 
 ## License
 
