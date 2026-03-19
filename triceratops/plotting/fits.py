@@ -156,9 +156,14 @@ def _plottable_scenarios(
         if len(result.host_mass_msun) == 0:
             continue
         column = _column_for_scenario(result.scenario_id)
-        if max_per_column is not None and len(columns[column]) >= max_per_column:
-            continue
         columns[column].append(result)
+    for idx, column_results in enumerate(columns):
+        column_results.sort(
+            key=lambda result: result.relative_probability,
+            reverse=True,
+        )
+        if max_per_column is not None:
+            columns[idx] = column_results[:max_per_column]
     return columns
 
 
@@ -200,12 +205,34 @@ def _build_axes(nrows: int):
 
 
 def _annotate_axis(ax, sr: ScenarioResult, validation_result: ValidationResult) -> None:
-    host_label = (
-        str(sr.host_star_tic_id) if sr.host_star_tic_id != 0
-        else str(validation_result.target_id)
-    )
+    if sr.host_star_tic_id != 0:
+        host_label = str(sr.host_star_tic_id)
+    elif sr.scenario_id in ScenarioID.nearby_scenarios():
+        host_label = "unknown"
+    else:
+        host_label = str(validation_result.target_id)
     ax.annotate(host_label, xy=(0.05, 0.92), xycoords="axes fraction", fontsize=12)
     ax.annotate(str(sr.scenario_id), xy=(0.05, 0.05), xycoords="axes fraction", fontsize=12)
+
+
+def _tess_plot_light_curve(
+    light_curve: LightCurve,
+    scenario_result: ScenarioResult,
+    validation_result: ValidationResult,
+) -> LightCurve:
+    """Return the host-renormalized TESS light curve for one plotted row.
+
+    Vendor TRICERATOPS+ renormalizes the plotted TESS light curve to the row
+    host before overlaying the best-fit model. We mirror that behavior using
+    the host TIC ID carried on the ScenarioResult and the flux-ratio map
+    captured on ValidationResult during aggregation.
+    """
+    flux_ratio = validation_result.host_star_flux_ratio_tess_by_tic_id.get(
+        scenario_result.host_star_tic_id,
+    )
+    if flux_ratio is None or flux_ratio <= 0.0 or flux_ratio > 1.0:
+        return light_curve
+    return light_curve.with_renorm(flux_ratio)
 
 
 def _finalize_plot(fig, *, save: bool, fname: str | None, default_name: str) -> None:
@@ -254,12 +281,17 @@ def plot_fits(
                 ax.axis("off")
                 continue
             sr = column_results[row_index]
+            plotted_light_curve = _tess_plot_light_curve(
+                light_curve,
+                sr,
+                validation_result,
+            )
             y_formatter = ticker.ScalarFormatter(useOffset=False)
             ax.yaxis.set_major_formatter(y_formatter)
             ax.errorbar(
-                light_curve.time_days,
-                light_curve.flux,
-                light_curve.flux_err,
+                plotted_light_curve.time_days,
+                plotted_light_curve.flux,
+                plotted_light_curve.flux_err,
                 fmt="o",
                 color="dodgerblue",
                 elinewidth=1.0,
@@ -270,7 +302,7 @@ def plot_fits(
                 rasterized=True,
             )
             try:
-                model_flux = _best_fit_model(model_time, sr, light_curve)
+                model_flux = _best_fit_model(model_time, sr, plotted_light_curve)
             except Exception:  # noqa: BLE001
                 model_flux = np.ones(len(model_time))
             ax.plot(model_time, model_flux, "k-", lw=3, zorder=2)
@@ -316,7 +348,11 @@ def plot_fits_palomar(
 
     lc = external_light_curve.light_curve
     if x_range is None or len(x_range) == 0:
-        reference_time = lc.time_days if reference_light_curve is None else reference_light_curve.time_days
+        reference_time = (
+            lc.time_days
+            if reference_light_curve is None
+            else reference_light_curve.time_days
+        )
         model_time = np.linspace(
             float(np.min(reference_time)),
             float(np.max(reference_time)),
@@ -424,6 +460,11 @@ def plot_fits_joint(
                 ax.axis("off")
                 continue
             sr = column_results[row_index]
+            plotted_tess_light_curve = _tess_plot_light_curve(
+                light_curve,
+                sr,
+                validation_result,
+            )
             y_formatter = ticker.ScalarFormatter(useOffset=False)
             ax.yaxis.set_major_formatter(y_formatter)
             ax.errorbar(
@@ -446,7 +487,11 @@ def plot_fits_joint(
                     lc,
                     external_lc_index=external_lc_index,
                 )
-                tess_model = _best_fit_model(model_time, sr, light_curve)
+                tess_model = _best_fit_model(
+                    model_time,
+                    sr,
+                    plotted_tess_light_curve,
+                )
             except Exception:  # noqa: BLE001
                 external_model = np.ones(len(model_time))
                 tess_model = np.ones(len(model_time))

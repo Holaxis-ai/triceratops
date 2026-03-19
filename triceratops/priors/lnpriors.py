@@ -359,6 +359,7 @@ def lnprior_background(
     delta_mags: np.ndarray,
     separations_arcsec: np.ndarray,
     contrasts: np.ndarray,
+    numerical_mode: str = "corrected",
 ) -> np.ndarray:
     """Log prior for a background star scenario (D and B scenarios).
 
@@ -375,4 +376,12 @@ def lnprior_background(
     """
     seps = _separation_at_contrast(delta_mags, separations_arcsec, contrasts)
     with np.errstate(divide='ignore', invalid='ignore'):
-        return np.log((n_comp / 0.1) * (1 / 3600) ** 2 * seps**2)
+        base = (n_comp / 0.1) * (1 / 3600) ** 2 * seps**2
+        if numerical_mode == "legacy":
+            return np.log10(base)
+        if numerical_mode != "corrected":
+            raise ValueError(
+                "numerical_mode must be 'corrected' or 'legacy', "
+                f"got {numerical_mode!r}"
+            )
+        return np.log(base)

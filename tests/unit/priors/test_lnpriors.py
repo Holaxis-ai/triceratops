@@ -153,6 +153,46 @@ class TestBackground:
         # Very small separation -> very negative log prior
         assert result[0] < -4
 
+    def test_corrected_mode_uses_natural_log(self) -> None:
+        delta_mags = np.array([3.0])
+        seps = np.array([0.5, 1.0, 2.0])
+        contrasts = np.array([2.0, 4.0, 6.0])
+        result = lnprior_background(
+            n_comp=100,
+            delta_mags=delta_mags,
+            separations_arcsec=seps,
+            contrasts=contrasts,
+            numerical_mode="corrected",
+        )
+        expected_sep = 0.75
+        expected = np.log((100 / 0.1) * (1 / 3600) ** 2 * expected_sep**2)
+        assert result[0] == pytest.approx(expected)
+
+    def test_legacy_mode_uses_log10(self) -> None:
+        delta_mags = np.array([3.0])
+        seps = np.array([0.5, 1.0, 2.0])
+        contrasts = np.array([2.0, 4.0, 6.0])
+        result = lnprior_background(
+            n_comp=100,
+            delta_mags=delta_mags,
+            separations_arcsec=seps,
+            contrasts=contrasts,
+            numerical_mode="legacy",
+        )
+        expected_sep = 0.75
+        expected = np.log10((100 / 0.1) * (1 / 3600) ** 2 * expected_sep**2)
+        assert result[0] == pytest.approx(expected)
+
+    def test_invalid_numerical_mode_raises(self) -> None:
+        with pytest.raises(ValueError, match="numerical_mode"):
+            lnprior_background(
+                n_comp=100,
+                delta_mags=np.array([1.0]),
+                separations_arcsec=np.array([0.5, 1.0]),
+                contrasts=np.array([2.0, 4.0]),
+                numerical_mode="bad-mode",
+            )
+
 
 @pytest.mark.unit
 class TestEdgeCases:
@@ -269,19 +309,14 @@ class TestComputeCompanionRate:
             return a_cm / CONST.au
 
         for logP_break in [1.0, 2.0, 3.4, 5.5, 8.0]:
-            sep_break = logP_to_sep_au(logP_break)
             # Separations just below and just above the breakpoint (in AU)
             sep_lo = logP_to_sep_au(logP_break - 0.01)
             sep_hi = logP_to_sep_au(logP_break + 0.01)
             # Convert AU separations to arcsec for the contrast curve
             sep_arcsec_lo = sep_lo / d
             sep_arcsec_hi = sep_hi / d
-            sep_arcsec_break = sep_break / d
             # Build single-element contrast curves that map any delta_mag -> this sep
             delta = np.array([3.0])
-            seps_cc = np.array([0.0, sep_arcsec_lo, sep_arcsec_break, sep_arcsec_hi, 1e6])
-            contrasts_cc = np.array([0.0, 1.0, 2.0, 4.0, 5.0])
-
             lo_result = _compute_companion_rate(
                 primary_mass=M_s,
                 parallax_mas=plx,
@@ -310,11 +345,8 @@ class TestComputeCompanionRate:
     def test_f_comp_zero_returns_neg_inf(self) -> None:
         # When f_comp <= 0 (e.g. logP < 3.4 for TP variant), log(0) = -inf.
         # Use a very small separation so logP is tiny, forcing the zero branch.
-        from triceratops.config.config import CONST
-
         M_s = 1.5
         plx = 1000.0  # d = 1 pc => tiny seps in AU
-        d = 1000 / plx
         # Very small arcsec separation => very small AU => very short period
         tiny_sep_arcsec = 1e-6
         result = _compute_companion_rate(

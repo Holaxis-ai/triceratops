@@ -14,7 +14,7 @@ from __future__ import annotations
 import os
 from collections.abc import Sequence
 from concurrent.futures import ProcessPoolExecutor
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 
 import numpy as np
 
@@ -59,6 +59,7 @@ class ScenarioExecutionContext:
     external_lc_bands: tuple = ()
     filt: str | None = None
     molusc_data: MoluscData | None = None
+    result_scenario_ids: tuple[ScenarioID, ...] | None = None
 
 
 @dataclass
@@ -67,6 +68,9 @@ class ScenarioExecutionOutcome:
 
     results: tuple[ScenarioResult, ...]
     warnings: tuple[str, ...] = ()
+
+
+WorkItem = ScenarioExecutionContext | ScenarioExecutionOutcome
 
 
 def _worker_initializer() -> None:
@@ -123,23 +127,56 @@ def _scenario_worker(
             f"{ctx.scenario.scenario_id.value}: {exc}. "
             "Returning lnZ=-inf for this nearby scenario."
         )
-        results = [_empty_scenario_result(exc.scenario_id, ctx.target_id)]
+        results = [
+            _empty_scenario_result(
+                exc.scenario_id,
+                host_star_tic_id=ctx.target_id,
+            )
+        ]
         if exc.returns_twin:
-            results.append(_empty_scenario_result(ScenarioID.NEBX2P, ctx.target_id))
+            results.append(
+                _empty_scenario_result(
+                    ScenarioID.NEBX2P,
+                    host_star_tic_id=ctx.target_id,
+                )
+            )
         return ScenarioExecutionOutcome(results=tuple(results), warnings=(warning,))
     if isinstance(result_or_tuple, tuple):
-        return ScenarioExecutionOutcome(results=result_or_tuple)
-    return ScenarioExecutionOutcome(results=(result_or_tuple,))
+        results = result_or_tuple
+    else:
+        results = (result_or_tuple,)
+    if ctx.result_scenario_ids is not None:
+        results = _relabel_scenario_results(
+            results,
+            ctx.result_scenario_ids,
+        )
+    return ScenarioExecutionOutcome(results=results)
+
+
+def _relabel_scenario_results(
+    results: tuple[ScenarioResult, ...],
+    scenario_ids: tuple[ScenarioID, ...],
+) -> tuple[ScenarioResult, ...]:
+    if len(results) != len(scenario_ids):
+        raise ValueError(
+            "Nearby execution returned an unexpected number of ScenarioResults. "
+            f"Expected {len(scenario_ids)}, got {len(results)}."
+        )
+    return tuple(
+        replace(result, scenario_id=scenario_id)
+        for result, scenario_id in zip(results, scenario_ids, strict=True)
+    )
 
 
 def _empty_scenario_result(
     scenario_id: ScenarioID,
-    target_id: int,
+    *,
+    host_star_tic_id: int,
 ) -> ScenarioResult:
     zeros = np.zeros(1, dtype=float)
     return ScenarioResult(
         scenario_id=scenario_id,
-        host_star_tic_id=target_id,
+        host_star_tic_id=host_star_tic_id,
         ln_evidence=float("-inf"),
         host_mass_msun=zeros.copy(),
         host_radius_rsun=zeros.copy(),
@@ -206,20 +243,17 @@ class ValidationEngine:
         if config.seed is not None:
             np.random.seed(config.seed)
 
+        nearby_ids = ScenarioID.nearby_scenarios()
         if scenario_ids is None:
-            scenarios_to_run = self._registry.all_scenarios()
-            has_nearby_candidate = any(
-                star.transit_depth_required is not None
-                and star.transit_depth_required > 0.0
-                for star in stellar_field.neighbors
-            )
+            requested_ids = [scenario.scenario_id for scenario in self._registry.all_scenarios()]
+            has_nearby_candidate = bool(self._eligible_nearby_hosts(stellar_field))
             if not has_nearby_candidate:
-                scenarios_to_run = [
-                    s for s in scenarios_to_run
-                    if s.scenario_id not in ScenarioID.nearby_scenarios()
+                requested_ids = [
+                    sid for sid in requested_ids
+                    if sid not in nearby_ids
                 ]
         else:
-            scenarios_to_run = [self._registry.get(sid) for sid in scenario_ids]
+            requested_ids = list(scenario_ids)
 
         # trilegal_population must be pre-materialised by the caller.
         # The engine no longer fetches from any provider (Phase 2 boundary).
@@ -255,49 +289,106 @@ class ValidationEngine:
             "target_tmag": stellar_field.target.tmag,
         }
 
-        nearby_ids = ScenarioID.nearby_scenarios()
-        tasks = [
-            ScenarioExecutionContext(
-                scenario=scenario,
-                light_curve=(
-                    light_curve if scenario.scenario_id in nearby_ids
-                    else renormed_target_lc
-                ),
-                stellar_params=stellar_params,
-                period_days=period_days,
-                config=config,
-                external_lcs=external_lcs or [],
-                **shared_kwargs,
+        work_items: list[WorkItem] = []
+        for sid in requested_ids:
+            if sid in nearby_ids:
+                nearby_tasks = self._build_nearby_tasks_for_scenario(
+                    scenario_id=sid,
+                    light_curve=light_curve,
+                    stellar_field=stellar_field,
+                    period_days=period_days,
+                    config=config,
+                    external_lcs=external_lcs,
+                    contrast_curve=contrast_curve,
+                    molusc_data=molusc_data,
+                    trilegal_population=trilegal_population,
+                )
+                if nearby_tasks:
+                    work_items.extend(nearby_tasks)
+                else:
+                    work_items.append(
+                        self._empty_nearby_outcome(
+                            scenario_id=sid,
+                        )
+                    )
+                continue
+            work_items.append(
+                ScenarioExecutionContext(
+                    scenario=self._registry.get(sid),
+                    light_curve=renormed_target_lc,
+                    stellar_params=stellar_params,
+                    period_days=period_days,
+                    config=config,
+                    external_lcs=external_lcs or [],
+                    **shared_kwargs,
+                )
             )
-            for scenario in scenarios_to_run
-        ]
 
         all_results: list[ScenarioResult] = []
         all_warnings: list[str] = []
+        if not work_items:
+            return self._aggregate(
+                all_results,
+                stellar_field,
+                warnings=all_warnings,
+                rng_seed=config.seed,
+            )
         if config.n_workers == 0:
-            for task in tasks:
-                outcome = _scenario_worker(task)
+            for item in work_items:
+                outcome = (
+                    item
+                    if isinstance(item, ScenarioExecutionOutcome)
+                    else _scenario_worker(item)
+                )
                 all_results.extend(outcome.results)
                 all_warnings.extend(outcome.warnings)
         else:
+            task_count = sum(
+                1 for item in work_items
+                if isinstance(item, ScenarioExecutionContext)
+            )
+            if task_count == 0:
+                for item in work_items:
+                    outcome = (
+                        item
+                        if isinstance(item, ScenarioExecutionOutcome)
+                        else _scenario_worker(item)
+                    )
+                    all_results.extend(outcome.results)
+                    all_warnings.extend(outcome.warnings)
+                return self._aggregate(
+                    all_results,
+                    stellar_field,
+                    warnings=all_warnings,
+                    rng_seed=config.seed,
+                )
             n_workers = (
-                min(len(tasks), os.cpu_count() or 1)
+                min(task_count, os.cpu_count() or 1)
                 if config.n_workers < 0
-                else min(config.n_workers, len(tasks))
+                else min(config.n_workers, task_count)
             )
             with ProcessPoolExecutor(
                 max_workers=n_workers,
                 initializer=_worker_initializer,
             ) as pool:
-                futures = [pool.submit(_scenario_worker, task) for task in tasks]
-                for future in futures:
-                    outcome = future.result()
+                scheduled: list[ScenarioExecutionOutcome | object] = []
+                for item in work_items:
+                    if isinstance(item, ScenarioExecutionOutcome):
+                        scheduled.append(item)
+                    else:
+                        scheduled.append(pool.submit(_scenario_worker, item))
+                for scheduled_item in scheduled:
+                    outcome = (
+                        scheduled_item
+                        if isinstance(scheduled_item, ScenarioExecutionOutcome)
+                        else scheduled_item.result()
+                    )
                     all_results.extend(outcome.results)
                     all_warnings.extend(outcome.warnings)
 
         return self._aggregate(
             all_results,
-            stellar_field.target_id,
+            stellar_field,
             warnings=all_warnings,
             rng_seed=config.seed,
         )
@@ -401,6 +492,126 @@ class ValidationEngine:
         }
 
     @staticmethod
+    def _eligible_nearby_hosts(stellar_field: StellarField) -> list[Star]:
+        return [
+            star
+            for star in stellar_field.neighbors
+            if (
+                star.stellar_params is not None
+                and star.tic_id is not None
+                and
+                star.flux_ratio is not None
+                and star.flux_ratio > 0.0
+                and star.transit_depth_required is not None
+                and star.transit_depth_required > 0.0
+            )
+        ]
+
+    def _build_nearby_tasks_for_scenario(
+        self,
+        *,
+        scenario_id: ScenarioID,
+        light_curve: LightCurve,
+        stellar_field: StellarField,
+        period_days: PeriodSpec,
+        config: Config,
+        external_lcs: list[ExternalLightCurve] | None,
+        contrast_curve: ContrastCurve | None,
+        molusc_data: MoluscData | None,
+        trilegal_population: TRILEGALResult | None,
+    ) -> list[ScenarioExecutionContext]:
+        if scenario_id not in ScenarioID.nearby_scenarios():
+            return []
+
+        filt = contrast_curve.band if contrast_curve is not None else None
+        nearby_tasks: list[ScenarioExecutionContext] = []
+        scenario, result_scenario_ids = self._resolve_nearby_execution(
+            scenario_id,
+        )
+        for host in self._eligible_nearby_hosts(stellar_field):
+            renormed_light_curve = self._renorm_light_curve_for_host(
+                light_curve,
+                host.flux_ratio,
+            )
+            host_kwargs = {
+                "target_id": host.tic_id,
+                "contrast_curve": contrast_curve,
+                "filt": filt,
+                "molusc_data": molusc_data,
+                "trilegal_population": trilegal_population,
+                "host_magnitudes": self._extract_host_magnitudes(host),
+                "external_lc_bands": tuple(
+                    ext_lc.band for ext_lc in (external_lcs or [])
+                ),
+                "target_tmag": host.tmag,
+            }
+            nearby_tasks.append(
+                ScenarioExecutionContext(
+                    scenario=scenario,
+                    light_curve=renormed_light_curve,
+                    stellar_params=host.stellar_params,
+                    period_days=period_days,
+                    config=config,
+                    external_lcs=external_lcs or [],
+                    result_scenario_ids=result_scenario_ids,
+                    **host_kwargs,
+                )
+            )
+        return nearby_tasks
+
+    def _resolve_nearby_execution(
+        self,
+        scenario_id: ScenarioID,
+    ) -> tuple[Scenario, tuple[ScenarioID, ...]]:
+        """Resolve actual-nearby execution to the old parity kernels.
+
+        Nearby rows are now expanded per actual host star and evaluated with
+        the target-star TP/EB kernels on that host's renormalized light curve.
+        This intentionally bypasses any custom registry overrides registered
+        under NTP/NEB, because the parity path is star-specific rather than
+        the pooled "unknown nearby host" model represented by those classes.
+        """
+        if scenario_id == ScenarioID.NTP:
+            scenario = self._registry.get_or_none(ScenarioID.TP)
+            if scenario is None:
+                raise ValueError(
+                    "Nearby parity execution for NTP requires a TP scenario "
+                    "implementation in the registry."
+                )
+            return scenario, (ScenarioID.NTP,)
+        if scenario_id == ScenarioID.NEB:
+            scenario = self._registry.get_or_none(ScenarioID.EB)
+            if scenario is None:
+                raise ValueError(
+                    "Nearby parity execution for NEB requires an EB scenario "
+                    "implementation in the registry."
+                )
+            return scenario, (ScenarioID.NEB, ScenarioID.NEBX2P)
+        raise ValueError(
+            f"{scenario_id.value} is not supported as a primary nearby execution "
+            "entrypoint. Request NTP or NEB instead."
+        )
+
+    @staticmethod
+    def _empty_nearby_outcome(
+        *,
+        scenario_id: ScenarioID,
+    ) -> ScenarioExecutionOutcome:
+        results = [_empty_scenario_result(scenario_id, host_star_tic_id=0)]
+        if scenario_id == ScenarioID.NEB:
+            results.append(
+                _empty_scenario_result(
+                    ScenarioID.NEBX2P,
+                    host_star_tic_id=0,
+                )
+            )
+        warning = (
+            f"{scenario_id.value}: no eligible nearby host with positive flux_ratio "
+            "and transit_depth_required. Returning lnZ=-inf for this nearby scenario."
+        )
+        return ScenarioExecutionOutcome(results=tuple(results), warnings=(warning,))
+
+    @staticmethod
     def _renorm_light_curve_for_host(
         light_curve: LightCurve,
         host_flux_ratio: float | None,
@@ -414,18 +625,57 @@ class ValidationEngine:
         return light_curve.with_renorm(flux_ratio)
 
     @staticmethod
+    def _select_nearby_host_flux_ratio(
+        stellar_field: StellarField,
+    ) -> float | None:
+        """Select the brightest valid nearby-host candidate for LC renormalization.
+
+        Nearby scenarios model an eclipsed contaminant host rather than the
+        target star. The folded light curve therefore needs to be renormalized
+        to a plausible contaminant flux contribution before those scenarios are
+        evaluated. We use the brightest nearby star that is still capable of
+        hosting the observed event (positive transit_depth_required).
+        """
+        candidate_flux_ratios = [
+            float(star.flux_ratio)
+            for star in stellar_field.neighbors
+            if (
+                star.flux_ratio is not None
+                and star.transit_depth_required is not None
+                and star.transit_depth_required > 0.0
+                and star.flux_ratio > 0.0
+            )
+        ]
+        if not candidate_flux_ratios:
+            return None
+        return max(candidate_flux_ratios)
+
+    @staticmethod
     def _aggregate(
         results: list[ScenarioResult],
-        target_id: int,
+        stellar_field: StellarField | None = None,
+        *,
+        target_id: int | None = None,
+        host_star_flux_ratio_tess_by_tic_id: dict[int, float] | None = None,
         warnings: list[str] | None = None,
         rng_seed: int | None = None,
     ) -> ValidationResult:
-        return _aggregate(results, target_id, warnings=warnings, rng_seed=rng_seed)
+        return _aggregate(
+            results,
+            stellar_field,
+            target_id=target_id,
+            host_star_flux_ratio_tess_by_tic_id=host_star_flux_ratio_tess_by_tic_id,
+            warnings=warnings,
+            rng_seed=rng_seed,
+        )
 
 
 def _aggregate(
     results: list[ScenarioResult],
-    target_id: int,
+    stellar_field: StellarField | None = None,
+    *,
+    target_id: int | None = None,
+    host_star_flux_ratio_tess_by_tic_id: dict[int, float] | None = None,
     warnings: list[str] | None = None,
     rng_seed: int | None = None,
 ) -> ValidationResult:
@@ -434,12 +684,28 @@ def _aggregate(
     FPP = 1 - P(TP) - P(PTP) - P(DTP)
     NFPP = sum of NTP + NEB + NEBx2P probabilities.
     """
+    resolved_target_id = target_id
+    resolved_flux_ratio_map = (
+        {}
+        if host_star_flux_ratio_tess_by_tic_id is None
+        else dict(host_star_flux_ratio_tess_by_tic_id)
+    )
+    if stellar_field is not None:
+        resolved_target_id = stellar_field.target_id
+        resolved_flux_ratio_map.update({
+            star.tic_id: float(star.flux_ratio)
+            for star in stellar_field.stars
+            if star.flux_ratio is not None
+        })
+    if resolved_target_id is None:
+        raise TypeError("_aggregate() requires either stellar_field or target_id")
     if not results:
         return ValidationResult(
-            target_id=target_id,
+            target_id=resolved_target_id,
             false_positive_probability=1.0,
             nearby_false_positive_probability=0.0,
             scenario_results=[],
+            host_star_flux_ratio_tess_by_tic_id=resolved_flux_ratio_map,
             warnings=[] if warnings is None else list(warnings),
             rng_seed=rng_seed,
         )
@@ -474,10 +740,11 @@ def _aggregate(
     ))
 
     return ValidationResult(
-        target_id=target_id,
+        target_id=resolved_target_id,
         false_positive_probability=fpp,
         nearby_false_positive_probability=nfpp,
         scenario_results=results,
+        host_star_flux_ratio_tess_by_tic_id=resolved_flux_ratio_map,
         warnings=[] if warnings is None else list(warnings),
         rng_seed=rng_seed,
     )

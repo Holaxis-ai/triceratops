@@ -1,7 +1,7 @@
 """Tests for ValidationEngine."""
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 import numpy as np
 import pytest
@@ -11,7 +11,6 @@ from triceratops.domain.entities import LightCurve, Star, StellarField
 from triceratops.domain.result import ScenarioResult, ValidationResult
 from triceratops.domain.scenario_id import ScenarioID
 from triceratops.domain.value_objects import StellarParameters
-from triceratops.scenarios.nearby_scenarios import EmptyTrilegalPeerPopulationError
 from triceratops.scenarios.registry import ScenarioRegistry
 from triceratops.validation.engine import ValidationEngine
 
@@ -83,6 +82,7 @@ class _FakeScenario:
 class _RecordingScenario(_FakeScenario):
     """Fake scenario that records the light curve passed by the engine."""
     seen_light_curve: LightCurve | None = None
+    seen_target_ids: list[int] | None = None
 
     def compute(
         self,
@@ -94,29 +94,19 @@ class _RecordingScenario(_FakeScenario):
         **kwargs: object,
     ) -> ScenarioResult | tuple[ScenarioResult, ScenarioResult]:
         self.seen_light_curve = light_curve  # type: ignore[assignment]
-        return self._result
-
-
-@dataclass
-class _FailingNearbyScenario(_FakeScenario):
-    """Fake nearby scenario that reproduces an empty TRILEGAL peer set."""
-
-    _target_tmag: float = 10.0
-
-    def compute(
-        self,
-        light_curve: object = None,
-        stellar_params: object = None,
-        period_days: object = None,
-        config: object = None,
-        external_lcs: object = None,
-        **kwargs: object,
-    ) -> ScenarioResult | tuple[ScenarioResult, ScenarioResult]:
-        raise EmptyTrilegalPeerPopulationError(
-            scenario_id=self._scenario_id,
-            returns_twin=self.returns_twin,
-            target_tmag=self._target_tmag,
-        )
+        if self.seen_target_ids is None:
+            self.seen_target_ids = []
+        target_id = kwargs.get("target_id")
+        if target_id is None:
+            return self._result
+        target_id_int = int(target_id)
+        self.seen_target_ids.append(target_id_int)
+        if isinstance(self._result, tuple):
+            return tuple(
+                replace(result, host_star_tic_id=target_id_int)
+                for result in self._result
+            )
+        return replace(self._result, host_star_tic_id=target_id_int)
 
 
 # ---------------------------------------------------------------------------
@@ -528,6 +518,7 @@ class TestEngineCompute:
             bmag=14.0,
             vmag=13.5,
             stellar_params=stellar_field.target.stellar_params,
+            flux_ratio=0.2,
             transit_depth_required=0.02,
         )
         stellar_field.stars.append(neighbor)
@@ -568,15 +559,30 @@ class TestEngineCompute:
             transit_lc.sigma / 0.8
         )
 
-    def test_compute_keeps_raw_light_curve_for_nearby_scenarios(
+    def test_compute_renorms_nearby_host_light_curve_before_dispatch(
         self, transit_lc, stellar_field, small_config,
     ) -> None:
         stellar_field.target.flux_ratio = 0.8
-        ntp_result = _make_result(ScenarioID.NTP, lnZ=0.0)
-        fake_ntp = _RecordingScenario(ScenarioID.NTP, False, ntp_result)
+        neighbor = Star(
+            tic_id=87654321,
+            ra_deg=83.83,
+            dec_deg=-5.40,
+            tmag=13.0,
+            jmag=12.0,
+            hmag=11.8,
+            kmag=11.7,
+            bmag=14.0,
+            vmag=13.5,
+            stellar_params=stellar_field.target.stellar_params,
+            flux_ratio=0.5,
+            transit_depth_required=0.02,
+        )
+        stellar_field.stars.append(neighbor)
+        tp_result = _make_result(ScenarioID.TP, lnZ=0.0)
+        fake_tp = _RecordingScenario(ScenarioID.TP, False, tp_result)
 
         registry = ScenarioRegistry()
-        registry.register(fake_ntp)
+        registry.register(fake_tp)
 
         engine = ValidationEngine(registry=registry)
         engine._compute(
@@ -587,20 +593,36 @@ class TestEngineCompute:
             scenario_ids=[ScenarioID.NTP],
         )
 
-        assert fake_ntp.seen_light_curve is transit_lc
+        assert fake_tp.seen_light_curve is not None
+        expected_flux = (transit_lc.flux - 0.5) / 0.5
+        assert fake_tp.seen_light_curve.flux == pytest.approx(expected_flux)
+        assert fake_tp.seen_light_curve.sigma == pytest.approx(
+            transit_lc.sigma / 0.5
+        )
+        assert fake_tp.seen_target_ids == [87654321]
 
-    def test_compute_converts_empty_ntp_peers_into_warning_and_neg_inf_result(
+    def test_compute_dispatches_tp_kernel_for_nearby_ntp_and_relabels_result(
         self, transit_lc, stellar_field, small_config,
     ) -> None:
-        registry = ScenarioRegistry()
-        registry.register(
-            _FailingNearbyScenario(
-                ScenarioID.NTP,
-                False,
-                _make_result(ScenarioID.NTP, lnZ=0.0),
-                _target_tmag=stellar_field.target.tmag or 10.0,
-            )
+        neighbor = Star(
+            tic_id=87654321,
+            ra_deg=83.83,
+            dec_deg=-5.40,
+            tmag=13.0,
+            jmag=12.0,
+            hmag=11.8,
+            kmag=11.7,
+            bmag=14.0,
+            vmag=13.5,
+            stellar_params=stellar_field.target.stellar_params,
+            flux_ratio=0.5,
+            transit_depth_required=0.02,
         )
+        stellar_field.stars.append(neighbor)
+        fake_tp = _RecordingScenario(ScenarioID.TP, False, _make_result(ScenarioID.TP, lnZ=0.0))
+
+        registry = ScenarioRegistry()
+        registry.register(fake_tp)
 
         engine = ValidationEngine(registry=registry)
         result = engine._compute(
@@ -612,28 +634,44 @@ class TestEngineCompute:
         )
 
         assert [sr.scenario_id for sr in result.scenario_results] == [ScenarioID.NTP]
-        ntp = result.scenario_results[0]
-        assert ntp.ln_evidence == float("-inf")
-        assert ntp.relative_probability == 0.0
-        assert len(result.warnings) == 1
-        assert "NTP" in result.warnings[0]
-        assert "Returning lnZ=-inf" in result.warnings[0]
+        assert fake_tp.seen_target_ids == [87654321]
+        assert result.scenario_results[0].host_star_tic_id == 87654321
 
-    def test_parallel_compute_converts_empty_neb_peers_into_placeholder_pair(
+    def test_compute_requires_tp_kernel_for_nearby_ntp(
+        self, transit_lc, stellar_field, small_config,
+    ) -> None:
+        neighbor = Star(
+            tic_id=87654321,
+            ra_deg=83.83,
+            dec_deg=-5.40,
+            tmag=13.0,
+            jmag=12.0,
+            hmag=11.8,
+            kmag=11.7,
+            bmag=14.0,
+            vmag=13.5,
+            stellar_params=stellar_field.target.stellar_params,
+            flux_ratio=0.5,
+            transit_depth_required=0.02,
+        )
+        stellar_field.stars.append(neighbor)
+
+        engine = ValidationEngine(registry=ScenarioRegistry())
+        with pytest.raises(ValueError, match="requires a TP scenario"):
+            engine._compute(
+                transit_lc,
+                stellar_field,
+                period_days=5.0,
+                config=small_config,
+                scenario_ids=[ScenarioID.NTP],
+            )
+
+    def test_compute_nearby_only_with_no_eligible_host_returns_placeholder_result(
         self, transit_lc, stellar_field,
     ) -> None:
+        fake_tp = _RecordingScenario(ScenarioID.TP, False, _make_result(ScenarioID.TP, lnZ=0.0))
         registry = ScenarioRegistry()
-        registry.register(
-            _FailingNearbyScenario(
-                ScenarioID.NEB,
-                True,
-                (
-                    _make_result(ScenarioID.NEB, lnZ=0.0),
-                    _make_result(ScenarioID.NEBX2P, lnZ=0.0),
-                ),
-                _target_tmag=stellar_field.target.tmag or 10.0,
-            )
-        )
+        registry.register(fake_tp)
 
         engine = ValidationEngine(registry=registry)
         result = engine._compute(
@@ -641,17 +679,207 @@ class TestEngineCompute:
             stellar_field,
             period_days=5.0,
             config=Config(n_mc_samples=100, n_best_samples=10, n_workers=1),
-            scenario_ids=[ScenarioID.NEB],
+            scenario_ids=[ScenarioID.NTP],
+        )
+
+        assert [sr.scenario_id for sr in result.scenario_results] == [ScenarioID.NTP]
+        assert result.scenario_results[0].ln_evidence == float("-inf")
+        assert result.scenario_results[0].host_star_tic_id == 0
+        assert result.scenario_results[0].relative_probability == 0.0
+        assert fake_tp.seen_target_ids is None
+        assert len(result.warnings) == 1
+        assert "no eligible nearby host" in result.warnings[0]
+
+    def test_compute_expands_nearby_rows_per_valid_neighbor(
+        self, transit_lc, stellar_field, small_config,
+    ) -> None:
+        stellar_field.stars.extend(
+            [
+                Star(
+                    tic_id=111,
+                    ra_deg=83.81,
+                    dec_deg=-5.41,
+                    tmag=13.0,
+                    jmag=12.0,
+                    hmag=11.9,
+                    kmag=11.8,
+                    bmag=14.0,
+                    vmag=13.4,
+                    stellar_params=stellar_field.target.stellar_params,
+                    flux_ratio=0.1,
+                    transit_depth_required=0.03,
+                ),
+                Star(
+                    tic_id=222,
+                    ra_deg=83.84,
+                    dec_deg=-5.42,
+                    tmag=14.0,
+                    jmag=13.0,
+                    hmag=12.9,
+                    kmag=12.8,
+                    bmag=15.0,
+                    vmag=14.4,
+                    stellar_params=stellar_field.target.stellar_params,
+                    flux_ratio=0.4,
+                    transit_depth_required=0.02,
+                ),
+            ]
+        )
+        fake_tp = _RecordingScenario(ScenarioID.TP, False, _make_result(ScenarioID.TP, lnZ=0.0))
+        fake_eb = _RecordingScenario(
+            ScenarioID.EB,
+            True,
+            (
+                _make_result(ScenarioID.EB, lnZ=-1.0),
+                _make_result(ScenarioID.EBX2P, lnZ=-2.0),
+            ),
+        )
+
+        registry = ScenarioRegistry()
+        registry.register(fake_tp)
+        registry.register(fake_eb)
+
+        engine = ValidationEngine(registry=registry)
+        result = engine._compute(
+            transit_lc,
+            stellar_field,
+            period_days=5.0,
+            config=small_config,
+            scenario_ids=[ScenarioID.NTP, ScenarioID.NEB],
+        )
+
+        assert fake_tp.seen_target_ids == [111, 222]
+        assert fake_eb.seen_target_ids == [111, 222]
+        assert [
+            (sr.scenario_id, sr.host_star_tic_id)
+            for sr in result.scenario_results
+        ] == [
+            (ScenarioID.NTP, 111),
+            (ScenarioID.NTP, 222),
+            (ScenarioID.NEB, 111),
+            (ScenarioID.NEBX2P, 111),
+            (ScenarioID.NEB, 222),
+            (ScenarioID.NEBX2P, 222),
+        ]
+
+    def test_compute_preserves_requested_order_with_nearby_ids(
+        self, transit_lc, stellar_field, small_config,
+    ) -> None:
+        stellar_field.stars.append(
+            Star(
+                tic_id=111,
+                ra_deg=83.81,
+                dec_deg=-5.41,
+                tmag=13.0,
+                jmag=12.0,
+                hmag=11.9,
+                kmag=11.8,
+                bmag=14.0,
+                vmag=13.4,
+                stellar_params=stellar_field.target.stellar_params,
+                flux_ratio=0.1,
+                transit_depth_required=0.03,
+            )
+        )
+        fake_tp = _RecordingScenario(ScenarioID.TP, False, _make_result(ScenarioID.TP, lnZ=-1.0))
+
+        registry = ScenarioRegistry()
+        registry.register(fake_tp)
+
+        engine = ValidationEngine(registry=registry)
+        result = engine._compute(
+            transit_lc,
+            stellar_field,
+            period_days=5.0,
+            config=small_config,
+            scenario_ids=[ScenarioID.NTP, ScenarioID.TP],
         )
 
         assert [sr.scenario_id for sr in result.scenario_results] == [
-            ScenarioID.NEB,
-            ScenarioID.NEBX2P,
+            ScenarioID.NTP,
+            ScenarioID.TP,
         ]
-        assert all(sr.ln_evidence == float("-inf") for sr in result.scenario_results)
-        assert all(sr.relative_probability == 0.0 for sr in result.scenario_results)
-        assert len(result.warnings) == 1
-        assert "NEB" in result.warnings[0]
+
+    def test_select_nearby_host_flux_ratio_uses_brightest_valid_candidate(
+        self, stellar_field,
+    ) -> None:
+        stellar_field.stars.extend(
+            [
+                Star(
+                    tic_id=111,
+                    ra_deg=83.81,
+                    dec_deg=-5.41,
+                    tmag=13.0,
+                    jmag=12.0,
+                    hmag=11.9,
+                    kmag=11.8,
+                    bmag=14.0,
+                    vmag=13.4,
+                    stellar_params=stellar_field.target.stellar_params,
+                    flux_ratio=0.1,
+                    transit_depth_required=0.03,
+                ),
+                Star(
+                    tic_id=222,
+                    ra_deg=83.84,
+                    dec_deg=-5.42,
+                    tmag=14.0,
+                    jmag=13.0,
+                    hmag=12.9,
+                    kmag=12.8,
+                    bmag=15.0,
+                    vmag=14.4,
+                    stellar_params=stellar_field.target.stellar_params,
+                    flux_ratio=0.4,
+                    transit_depth_required=0.02,
+                ),
+                Star(
+                    tic_id=333,
+                    ra_deg=83.85,
+                    dec_deg=-5.43,
+                    tmag=15.0,
+                    jmag=14.0,
+                    hmag=13.9,
+                    kmag=13.8,
+                    bmag=16.0,
+                    vmag=15.4,
+                    stellar_params=stellar_field.target.stellar_params,
+                    flux_ratio=0.6,
+                    transit_depth_required=0.0,
+                ),
+            ]
+        )
+
+        assert ValidationEngine._select_nearby_host_flux_ratio(stellar_field) == pytest.approx(0.4)
+
+    def test_compute_requires_eb_kernel_for_neb(
+        self, transit_lc, stellar_field, small_config,
+    ) -> None:
+        stellar_field.stars.append(
+            Star(
+                tic_id=87654321,
+                ra_deg=83.83,
+                dec_deg=-5.40,
+                tmag=13.0,
+                jmag=12.0,
+                hmag=11.8,
+                kmag=11.7,
+                bmag=14.0,
+                vmag=13.5,
+                stellar_params=stellar_field.target.stellar_params,
+                flux_ratio=0.5,
+                transit_depth_required=0.02,
+            )
+        )
+        engine = ValidationEngine(registry=ScenarioRegistry())
+        with pytest.raises(ValueError, match="requires an EB scenario"):
+            engine._compute(
+                transit_lc,
+                stellar_field,
+                period_days=5.0,
+                config=small_config,
+                scenario_ids=[ScenarioID.NEB],
+            )
 
 
 # ---------------------------------------------------------------------------

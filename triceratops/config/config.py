@@ -116,6 +116,9 @@ class Config:
         flat_priors: If True, draw planet radii uniformly instead of using the
             broken-power-law distribution. Original parameter name: ``flatpriors``.
         mission: Default mission when not overridden by MissionConfig.
+        numerical_mode: Internal compatibility mode for parity investigations.
+            ``"corrected"`` keeps the refactor's numerical fixes; ``"legacy"``
+            restores the original evidence/background-prior behavior.
     """
 
     n_mc_samples: int = 1_000_000
@@ -125,17 +128,17 @@ class Config:
     flat_priors: bool = False
     mission: str = "TESS"
     n_workers: int = 0
+    numerical_mode: str = "corrected"
     """Number of worker processes for scenario-level parallelism.
 
     0  — serial execution (default; fully reproducible with np.random.seed).
     -1 — one worker per scenario up to os.cpu_count().
     N  — exactly N worker processes.
 
-    Note: parallel workers each receive an independent OS-entropy RNG seed.
-    For fully reproducible parallel runs pass an explicit seed via
-    np.random.seed() before calling calc_probs with n_workers=0, or use
-    n_workers=0 and rely on Config.parallel=True for intra-scenario
-    vectorisation.
+    Note: scenario-level multiprocessing (``n_workers != 0``) is not supported
+    together with an explicit ``seed``. Use ``n_workers=0`` when you need
+    seeded/reproducible runs; ``parallel=True`` still enables intra-scenario
+    vectorisation in that mode.
     """
 
     def __post_init__(self) -> None:
@@ -154,6 +157,16 @@ class Config:
             raise ValueError(f"Unknown mission {self.mission!r}")
         if self.n_workers < -1:
             raise ValueError(f"n_workers must be >= -1, got {self.n_workers}")
+        if self.seed is not None and self.n_workers != 0:
+            raise ValueError(
+                "seeded scenario-level multiprocessing is not supported: "
+                "use n_workers=0 for reproducible runs"
+            )
+        if self.numerical_mode not in ("corrected", "legacy"):
+            raise ValueError(
+                "numerical_mode must be 'corrected' or 'legacy', "
+                f"got {self.numerical_mode!r}"
+            )
 
     @property
     def mission_config(self) -> MissionConfig:

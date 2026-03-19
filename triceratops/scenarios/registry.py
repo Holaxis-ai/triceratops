@@ -130,8 +130,10 @@ def build_default_registry(ldc_catalog: object | None = None) -> ScenarioRegistr
     reg = ScenarioRegistry()
 
     # Register one scenario per ScenarioID.
-    # NTP/NEB use the "Unknown" variant by default; callers can replace()
-    # with the "Evolved" variant if needed.
+    # NTP/NEB remain available for direct use and experimentation via the
+    # registry, but ValidationEngine's actual-nearby parity path dispatches
+    # real field neighbors through TP/EB kernels instead of these pooled
+    # "unknown nearby host" implementations.
     for cls in [
         TTPScenario, TEBScenario,
         PTPScenario, PEBScenario,

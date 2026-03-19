@@ -13,11 +13,11 @@ from triceratops.population.protocols import TRILEGALResult
 from triceratops.scenarios._background_helpers import (
     _combined_delta_mag,
     _compute_fluxratios_comp,
+    _compute_lnprior_companion,
     _filter_population_by_target_tmag,
     _needs_sdss_delta_mags,
     _sample_population_indices,
 )
-
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -274,3 +274,37 @@ class TestCombinedDeltaMag:
         delta_b = 2.5 * np.log10(b / (1 - b))
         assert np.all(combined >= delta_a)
         assert np.all(combined >= delta_b)
+
+
+class TestComputeLnpriorCompanion:
+    def test_no_contrast_legacy_uses_log10(self) -> None:
+        idxs = np.array([0, 1, 0])
+        fluxratios_comp = np.array([0.2, 0.3])
+        delta_mags_map = {"delta_TESSmags": np.array([-1.0, -0.5])}
+        result = _compute_lnprior_companion(
+            n_comp=25,
+            fluxratios_comp=fluxratios_comp,
+            idxs=idxs,
+            delta_mags_map=delta_mags_map,
+            contrast_curve=None,
+            filt="TESS",
+            numerical_mode="legacy",
+        )
+        expected = np.log10((25 / 0.1) * (1 / 3600) ** 2 * 2.2**2)
+        np.testing.assert_allclose(result, expected)
+
+    def test_no_contrast_corrected_uses_natural_log(self) -> None:
+        idxs = np.array([0, 1, 0])
+        fluxratios_comp = np.array([0.2, 0.3])
+        delta_mags_map = {"delta_TESSmags": np.array([-1.0, -0.5])}
+        result = _compute_lnprior_companion(
+            n_comp=25,
+            fluxratios_comp=fluxratios_comp,
+            idxs=idxs,
+            delta_mags_map=delta_mags_map,
+            contrast_curve=None,
+            filt="TESS",
+            numerical_mode="corrected",
+        )
+        expected = np.log((25 / 0.1) * (1 / 3600) ** 2 * 2.2**2)
+        np.testing.assert_allclose(result, expected)

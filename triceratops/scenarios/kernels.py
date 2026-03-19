@@ -38,6 +38,7 @@ def resolve_period(
 
 def compute_lnZ(
     lnL: np.ndarray,
+    numerical_mode: str = "corrected",
 ) -> float:
     """Compute the log marginal likelihood (evidence) from a lnL array.
 
@@ -56,6 +57,20 @@ def compute_lnZ(
     finite_mask = np.isfinite(lnL)
     if not np.any(finite_mask):
         return float(-np.inf)
+    if numerical_mode == "legacy":
+        # Match the original code path's evidence accumulation, including the
+        # fixed additive shift used to stave off underflow in exp(lnL).
+        lnz_const = 650.0
+        with np.errstate(over="ignore", under="ignore", invalid="ignore"):
+            z = float(np.mean(np.nan_to_num(np.exp(lnL + lnz_const))))
+        if z <= 0.0 or not np.isfinite(z):
+            return float(-np.inf)
+        return float(np.log(z) - lnz_const)
+    if numerical_mode != "corrected":
+        raise ValueError(
+            "numerical_mode must be 'corrected' or 'legacy', "
+            f"got {numerical_mode!r}"
+        )
     lnL_finite = lnL[finite_mask]
     lnL_max = float(np.max(lnL_finite))
     sum_exp = float(np.sum(np.exp(lnL_finite - lnL_max)))
