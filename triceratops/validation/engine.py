@@ -14,7 +14,7 @@ from __future__ import annotations
 import os
 from collections.abc import Sequence
 from concurrent.futures import ProcessPoolExecutor
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 
 import numpy as np
 
@@ -59,6 +59,7 @@ class ScenarioExecutionContext:
     external_lc_bands: tuple = ()
     filt: str | None = None
     molusc_data: MoluscData | None = None
+    result_scenario_ids: tuple[ScenarioID, ...] | None = None
 
 
 @dataclass
@@ -141,8 +142,30 @@ def _scenario_worker(
             )
         return ScenarioExecutionOutcome(results=tuple(results), warnings=(warning,))
     if isinstance(result_or_tuple, tuple):
-        return ScenarioExecutionOutcome(results=result_or_tuple)
-    return ScenarioExecutionOutcome(results=(result_or_tuple,))
+        results = result_or_tuple
+    else:
+        results = (result_or_tuple,)
+    if ctx.result_scenario_ids is not None:
+        results = _relabel_scenario_results(
+            results,
+            ctx.result_scenario_ids,
+        )
+    return ScenarioExecutionOutcome(results=results)
+
+
+def _relabel_scenario_results(
+    results: tuple[ScenarioResult, ...],
+    scenario_ids: tuple[ScenarioID, ...],
+) -> tuple[ScenarioResult, ...]:
+    if len(results) != len(scenario_ids):
+        raise ValueError(
+            "Nearby execution returned an unexpected number of ScenarioResults. "
+            f"Expected {len(scenario_ids)}, got {len(results)}."
+        )
+    return tuple(
+        replace(result, scenario_id=scenario_id)
+        for result, scenario_id in zip(results, scenario_ids, strict=True)
+    )
 
 
 def _empty_scenario_result(
@@ -502,7 +525,9 @@ class ValidationEngine:
 
         filt = contrast_curve.band if contrast_curve is not None else None
         nearby_tasks: list[ScenarioExecutionContext] = []
-        scenario = self._registry.get(scenario_id)
+        scenario, result_scenario_ids = self._resolve_nearby_execution(
+            scenario_id,
+        )
         for host in self._eligible_nearby_hosts(stellar_field):
             renormed_light_curve = self._renorm_light_curve_for_host(
                 light_curve,
@@ -528,10 +553,44 @@ class ValidationEngine:
                     period_days=period_days,
                     config=config,
                     external_lcs=external_lcs or [],
+                    result_scenario_ids=result_scenario_ids,
                     **host_kwargs,
                 )
             )
         return nearby_tasks
+
+    def _resolve_nearby_execution(
+        self,
+        scenario_id: ScenarioID,
+    ) -> tuple[Scenario, tuple[ScenarioID, ...]]:
+        """Resolve actual-nearby execution to the old parity kernels.
+
+        Nearby rows are now expanded per actual host star and evaluated with
+        the target-star TP/EB kernels on that host's renormalized light curve.
+        This intentionally bypasses any custom registry overrides registered
+        under NTP/NEB, because the parity path is star-specific rather than
+        the pooled "unknown nearby host" model represented by those classes.
+        """
+        if scenario_id == ScenarioID.NTP:
+            scenario = self._registry.get_or_none(ScenarioID.TP)
+            if scenario is None:
+                raise ValueError(
+                    "Nearby parity execution for NTP requires a TP scenario "
+                    "implementation in the registry."
+                )
+            return scenario, (ScenarioID.NTP,)
+        if scenario_id == ScenarioID.NEB:
+            scenario = self._registry.get_or_none(ScenarioID.EB)
+            if scenario is None:
+                raise ValueError(
+                    "Nearby parity execution for NEB requires an EB scenario "
+                    "implementation in the registry."
+                )
+            return scenario, (ScenarioID.NEB, ScenarioID.NEBX2P)
+        raise ValueError(
+            f"{scenario_id.value} is not supported as a primary nearby execution "
+            "entrypoint. Request NTP or NEB instead."
+        )
 
     @staticmethod
     def _empty_nearby_outcome(
